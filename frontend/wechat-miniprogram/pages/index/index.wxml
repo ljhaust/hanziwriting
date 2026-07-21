@@ -1,0 +1,303 @@
+<view class="mini-app">
+  <scroll-view class="page-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view wx:if="{{bootstrapLoading}}" class="data-status-card">
+      <text class="panel-title">正在连接后台</text>
+      <text class="record-desc">正在从数据库读取用户、字库、诗库、任务和练习记录。</text>
+    </view>
+    <view wx:elif="{{bootstrapError}}" class="data-status-card error">
+      <text class="panel-title">后台数据加载失败</text>
+      <text class="record-desc">{{bootstrapError}}</text>
+      <button class="secondary-action retry-button" bindtap="loadBootstrapData">重新加载</button>
+    </view>
+
+    <view wx:if="{{activeTab === 'home'}}" class="page-content">
+      <view class="student-card">
+        <view class="student-copy">
+          <text class="muted">{{currentStudent.nickname}}</text>
+          <text class="headline">今日还有 {{activeTasks.length}} 个任务</text>
+        </view>
+        <view class="progress-ring">
+          <text class="progress-value">{{studentProgress}}%</text>
+        </view>
+      </view>
+
+      <view class="stat-grid">
+        <view class="stat-card">
+          <text class="stat-value">{{consecutiveDays}}</text>
+          <text class="stat-label">连续天数</text>
+        </view>
+        <view class="stat-card">
+          <text class="stat-value">{{studentHanziCount}}</text>
+          <text class="stat-label">已练汉字</text>
+        </view>
+        <view class="stat-card">
+          <text class="stat-value">{{studentPoemCount}}</text>
+          <text class="stat-label">背诵古诗</text>
+        </view>
+      </view>
+
+      <text class="section-title">今日作业</text>
+      <view wx:if="{{!activeTasks.length && !bootstrapLoading}}" class="empty-card">数据库中暂无进行中的任务</view>
+      <view wx:for="{{activeTasks}}" wx:key="id" class="task-card">
+        <view class="task-info">
+          <text class="tag {{item.task_type === 'poem' ? 'green' : 'orange'}}">{{item.typeLabel}}</text>
+          <text class="task-title">{{item.task_name}}</text>
+          <text class="task-desc">{{item.itemsText}}</text>
+        </view>
+        <button class="primary-pill" bindtap="openTask" data-task-id="{{item.id}}">开始</button>
+      </view>
+    </view>
+
+    <view wx:if="{{activeTab === 'hanzi'}}" class="page-content">
+      <view wx:if="{{!currentHanzi && !bootstrapLoading}}" class="empty-card">数据库中暂无汉字资源</view>
+      <view class="page-toolbar">
+        <view>
+          <text class="toolbar-kicker">生字练习</text>
+          <text class="toolbar-title">{{currentHanzi.character_text}}</text>
+        </view>
+        <picker mode="selector" range="{{hanziPickerLabels}}" value="{{selectedHanziIndex}}" disabled="{{!currentHanzi}}" bindchange="changeHanzi">
+          <view class="picker-button">{{currentHanzi.character_text}} {{currentHanzi.pinyin}}</view>
+        </picker>
+      </view>
+
+      <view class="copybook-card">
+        <text wx:if="{{!strokeDemoVisible}}" class="hanzi-preview">{{currentHanzi.character_text}}</text>
+        <canvas
+          id="writingCanvas"
+          type="2d"
+          class="writing-canvas"
+          disable-scroll="true"
+          bindtouchstart="startDrawing"
+          catchtouchmove="drawOnCanvas"
+          bindtouchend="stopDrawing"
+          bindtouchcancel="stopDrawing"
+        ></canvas>
+        <canvas
+          wx:if="{{strokeDemoVisible}}"
+          id="strokeDemoCanvas"
+          type="2d"
+          class="stroke-demo-canvas"
+          disable-scroll="true"
+        ></canvas>
+        <view wx:if="{{strokeDemoVisible}}" class="stroke-demo-caption">
+          <text class="stroke-demo-text">{{strokeDemoText}}</text>
+        </view>
+      </view>
+
+      <view class="stroke-panel">
+        <view class="stroke-row">
+          <text class="panel-title">笔画进度</text>
+          <text class="panel-meta">{{strokeCount}}/{{currentHanzi.stroke_count}}</text>
+        </view>
+        <view class="progress-bar">
+          <view class="progress-fill" style="width: {{strokePercent}}%;"></view>
+        </view>
+        <text class="hint-text">{{strokeHint}}</text>
+        <view wx:if="{{writingFeedbackVisible}}" class="writing-feedback {{writingFeedbackType}}">
+          <text class="writing-feedback-title">{{writingFeedbackType === 'error' ? '需要重写' : writingFeedbackType === 'success' ? '书写反馈' : '实时提示'}}</text>
+          <text class="writing-feedback-text">{{writingFeedbackText}}</text>
+        </view>
+        <view class="stroke-summary">
+          <text>错笔 {{mistakeCount}}</text>
+          <text>提示 {{hintCount}}</text>
+        </view>
+        <view class="demo-speed-row">
+          <view class="demo-speed-copy">
+            <text class="panel-title">演示速度</text>
+            <text class="hint-text">当前 {{strokeDemoSpeedLabel}}</text>
+          </view>
+          <text class="demo-speed-value">{{strokeDemoSpeed}}</text>
+        </view>
+        <slider
+          class="demo-speed-slider"
+          min="50"
+          max="200"
+          step="25"
+          value="{{strokeDemoSpeed}}"
+          activeColor="#111827"
+          backgroundColor="#e5e7eb"
+          blockColor="#111827"
+          bindchange="changeStrokeDemoSpeed"
+        />
+      </view>
+
+      <view class="action-row">
+        <button class="secondary-action" bindtap="clearCanvas">清空</button>
+        <button class="secondary-action" disabled="{{!currentHanzi}}" bindtap="playStrokeDemo">笔顺演示</button>
+        <button class="primary-action" disabled="{{!currentHanzi}}" bindtap="submitHanziPractice">提交评测</button>
+      </view>
+    </view>
+
+    <view wx:if="{{activeTab === 'poem'}}" class="page-content">
+      <view wx:if="{{!currentPoem && !bootstrapLoading}}" class="empty-card">数据库中暂无古诗资源</view>
+      <view class="page-toolbar">
+        <view>
+          <text class="toolbar-kicker">古诗背诵</text>
+          <text class="toolbar-title">{{currentPoem.title}}</text>
+        </view>
+        <picker mode="selector" range="{{poemPickerLabels}}" value="{{selectedPoemIndex}}" disabled="{{!currentPoem}}" bindchange="changePoem">
+          <view class="picker-button">{{currentPoem.title}}</view>
+        </picker>
+      </view>
+
+      <view class="poem-card">
+        <view class="poem-header">
+          <text class="panel-title">{{currentPoem.title}}</text>
+          <text class="panel-meta">{{currentPoem.dynasty}} · {{currentPoem.author}}</text>
+        </view>
+        <view class="poem-lines">
+          <view wx:for="{{poemLines}}" wx:for-item="line" wx:key="id" class="poem-line">
+            <button
+              wx:for="{{line.characters}}"
+              wx:for-item="char"
+              wx:key="key"
+              class="poem-char {{char.className}}"
+              bindtap="openPoemWriting"
+              data-char="{{char.text}}"
+              data-key="{{char.key}}"
+              data-blank="{{char.isBlank ? '1' : ''}}"
+              data-filled="{{char.isFilled ? '1' : ''}}"
+            >{{char.displayText}}</button>
+          </view>
+        </view>
+      </view>
+
+      <view class="note-card">
+        <text class="panel-title">译文与提示</text>
+        <text class="note-text">{{currentPoem.translation}}</text>
+      </view>
+    </view>
+
+    <view wx:if="{{activeTab === 'records'}}" class="page-content">
+      <text class="records-title">练习记录</text>
+      <view wx:if="{{!studentRecords.length && !bootstrapLoading}}" class="empty-card">数据库中暂无当前学生的练习记录</view>
+      <view wx:for="{{studentRecords}}" wx:key="id" class="record-card" bindtap="openRecordDetail" data-record-id="{{item.id}}">
+        <view class="record-info">
+          <text class="record-title">{{item.item_name}}</text>
+          <text class="record-desc">{{item.task_name}} {{item.practice_time}}</text>
+          <text class="record-desc">完成 {{item.stroke_completed || 0}}/{{item.stroke_total || 0}} · 错笔 {{item.mistake_count || 0}} · 提示 {{item.hint_count || 0}}</text>
+        </view>
+        <text class="score-tag">{{item.score_level}}</text>
+      </view>
+    </view>
+
+    <view wx:if="{{activeTab === 'profile'}}" class="page-content">
+      <view class="profile-header">
+        <view class="profile-avatar">{{profileInitial}}</view>
+        <view class="profile-copy">
+          <text class="profile-name">{{currentStudent.nickname}}</text>
+          <text class="record-desc">数据来自后台数据库</text>
+        </view>
+      </view>
+
+      <view class="profile-grid">
+        <view class="profile-stat">
+          <text class="stat-value">{{profileRecordCount}}</text>
+          <text class="stat-label">练习记录</text>
+        </view>
+        <view class="profile-stat">
+          <text class="stat-value">{{profileAccuracy}}%</text>
+          <text class="stat-label">笔顺正确率</text>
+        </view>
+        <view class="profile-stat">
+          <text class="stat-value">{{profileTotalMinutes}}</text>
+          <text class="stat-label">累计分钟</text>
+        </view>
+      </view>
+
+      <view class="setting-card">
+        <view class="setting-copy">
+          <text class="panel-title">笔顺纠错</text>
+          <text class="record-desc">开启后会校验每一笔的起笔、收笔和方向。</text>
+        </view>
+        <switch checked="{{strokeValidationEnabled}}" bindchange="toggleStrokeValidation" color="#111827" />
+      </view>
+
+      <view class="profile-list">
+        <view class="profile-row">
+          <text>累计错笔</text>
+          <text>{{profileWrongCount}} 次</text>
+        </view>
+        <view class="profile-row">
+          <text>已练汉字</text>
+          <text>{{studentHanziCount}} 个</text>
+        </view>
+        <view class="profile-row">
+          <text>背诵古诗</text>
+          <text>{{studentPoemCount}} 首</text>
+        </view>
+      </view>
+    </view>
+  </scroll-view>
+
+  <view wx:if="{{poemWritingVisible}}" class="modal-mask" catchtap="closePoemWriting">
+    <view class="poem-writing-sheet" catchtap="noop">
+      <view class="sheet-header">
+        <view>
+          <text class="toolbar-kicker">古诗填空</text>
+          <text class="sheet-title">手写“{{poemWritingTargetChar}}”</text>
+        </view>
+        <button class="icon-close" bindtap="closePoemWriting">×</button>
+      </view>
+      <view class="poem-writing-board">
+        <canvas
+          id="poemWritingCanvas"
+          type="2d"
+          class="poem-writing-canvas"
+          disable-scroll="true"
+          bindtouchstart="startPoemWriting"
+          catchtouchmove="drawPoemWriting"
+          bindtouchend="stopPoemWriting"
+          bindtouchcancel="stopPoemWriting"
+        ></canvas>
+      </view>
+      <text class="poem-writing-feedback">{{poemWritingFeedback}}</text>
+      <view class="sheet-actions">
+        <button class="secondary-action" bindtap="clearPoemWriting">重写</button>
+        <button class="primary-action" bindtap="confirmPoemWriting">确认填入</button>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{recordDetailVisible}}" class="modal-mask" catchtap="closeRecordDetail">
+    <view class="record-detail-sheet" catchtap="noop">
+      <view class="sheet-header">
+        <view>
+          <text class="toolbar-kicker">记录详情</text>
+          <text class="sheet-title">{{recordDetail.item_name}}</text>
+        </view>
+        <button class="icon-close" bindtap="closeRecordDetail">×</button>
+      </view>
+      <view class="detail-meta-grid">
+        <view class="detail-meta-item">
+          <text class="detail-meta-value">{{recordDetail.progressText}}</text>
+          <text class="stat-label">完成进度</text>
+        </view>
+        <view class="detail-meta-item">
+          <text class="detail-meta-value">{{recordDetail.mistakeText}}</text>
+          <text class="stat-label">错笔</text>
+        </view>
+        <view class="detail-meta-item">
+          <text class="detail-meta-value">{{recordDetail.durationText}}</text>
+          <text class="stat-label">耗时</text>
+        </view>
+      </view>
+      <view class="step-list">
+        <view wx:for="{{recordDetail.writing_steps}}" wx:key="index" class="step-row {{item.status}}">
+          <text class="step-index">{{item.index}}</text>
+          <view class="step-copy">
+            <text class="step-title">{{item.label}}</text>
+            <text class="record-desc">{{item.detail}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="tab-bar">
+    <button wx:for="{{tabs}}" wx:key="key" class="tab-item {{activeTab === item.key ? 'active' : ''}}" bindtap="switchTab" data-tab="{{item.key}}">
+      <text class="tab-icon">{{item.icon}}</text>
+      <text class="tab-label">{{item.label}}</text>
+    </button>
+  </view>
+</view>

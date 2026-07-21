@@ -1,0 +1,269 @@
+/* 管理端全局主题变量：集中定义基础文字和页面背景，避免组件内散落颜色常量。 */
+:root {
+  color: #111827;
+  background: #f4f4f7;
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+    system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+/* 统一盒模型，确保侧栏、表格和弹窗在不同浏览器下尺寸计算一致。 */
+* {
+  box-sizing: border-box;
+}
+
+/* 管理端占满浏览器视口，清除浏览器默认页边距。 */
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* 表单控件继承中文字体，避免 Element Plus 与原生按钮字体不一致。 */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* 侧栏使用原生按钮承载导航，需要明确提供可点击指针。 */
+button {
+  cursor: pointer;
+}
+
+/* 根容器只承载 Vue 管理端，确保路由切换时页面始终至少铺满视口。 */
+.platform-shell,
+.workspace {
+  min-height: 100vh;
+}
+
+/* 路由工作区直接展示管理端，不保留旧多端原型的居中舞台边距。 */
+.workspace {
+  display: grid;
+  padding: 0;
+}
+
+/* 登录页品牌标识使用固定尺寸，保持窄屏和桌面端的识别一致性。 */
+.brand-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 900;
+  background: #111827;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.18);
+}
+
+/* 管理端采用固定侧栏与自适应内容区，并禁止页面外层产生双滚动条。 */
+.admin-client {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  width: 100%;
+  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+/* 未登录状态跨越两列并居中登录卡片，避免预先展示任何数据库列表。 */
+.admin-login {
+  display: grid;
+  place-items: center;
+  grid-column: 1 / -1;
+  min-height: 100vh;
+  padding: 20px;
+  background: #f8fafc;
+}
+
+/* 登录卡片限制最大宽度，保证错误提示和输入框在小屏幕上仍完整可见。 */
+.login-card {
+  display: grid;
+  gap: 16px;
+  width: min(100%, 430px);
+  padding: 28px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+}
+
+/* 品牌标识与登录说明居中，形成清晰的鉴权入口层级。 */
+.login-card .brand-mark {
+  margin: 0 auto;
+}
+
+.login-card h2,
+.login-card p {
+  margin: 0;
+  text-align: center;
+}
+
+.login-card p {
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+/* 登录按钮占满表单宽度，便于明确展示后台鉴权请求的提交状态。 */
+.login-submit {
+  width: 100%;
+}
+
+/* 侧栏使用深色背景区分导航和数据库内容区域。 */
+.admin-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 20px 16px;
+  overflow-y: auto;
+  background: #0f172a;
+}
+
+/* 当前登录用户信息块展示后台返回的昵称和角色，不使用本地身份占位。 */
+.admin-profile {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 14px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.admin-profile span {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 13px;
+}
+
+/* 导航按钮保持整行点击区域，激活项使用白底提高对比度。 */
+.admin-sidebar button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 12px;
+  color: rgba(255, 255, 255, 0.66);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+}
+
+.admin-sidebar button.active {
+  color: #111827;
+  font-weight: 900;
+  background: #ffffff;
+}
+
+/* 内容区独立滚动，长表格不会推动固定侧栏或产生外层横向滚动。 */
+.admin-main {
+  min-width: 0;
+  height: 100vh;
+  padding: 24px;
+  overflow: auto;
+  background: #f8fafc;
+}
+
+/* 工具栏将当前模块标题与搜索、刷新、创建操作分别放置在两端。 */
+.admin-toolbar,
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+}
+
+.admin-toolbar {
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.admin-toolbar span {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-toolbar h2 {
+  margin: 4px 0 0;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.toolbar-actions {
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* 搜索框在桌面端保持稳定宽度，窄屏时由媒体查询改为整行。 */
+.search-input {
+  width: 220px;
+}
+
+/* 后端加载失败时将错误信息与数据表格分隔，防止被误认为普通空数据。 */
+.load-error {
+  margin-bottom: 18px;
+}
+
+/* 表格边框明确数据库结果区域，空状态仍保留可识别的内容边界。 */
+.data-table {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+/* 任务资源选择器允许标签换行，避免资源较多时撑破发布弹窗。 */
+.task-item-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+/* 平板宽度下将侧栏改为横向导航，内容区恢复自然高度和页面滚动。 */
+@media (max-width: 900px) {
+  .admin-client {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .admin-sidebar {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .admin-profile {
+    min-width: 180px;
+    margin-bottom: 0;
+  }
+
+  .admin-main {
+    height: auto;
+    min-height: 0;
+  }
+}
+
+/* 手机宽度下工具栏纵向排列，使搜索和操作按钮保持完整可点击尺寸。 */
+@media (max-width: 600px) {
+  .admin-main {
+    padding: 16px;
+  }
+
+  .admin-toolbar,
+  .toolbar-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+}
