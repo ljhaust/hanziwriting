@@ -1,4 +1,4 @@
-const { createPracticeRecord, fetchBootstrapData, fetchStrokeGuide } = require("../../utils/api");
+const { createPracticeRecord, fetchBootstrapData, fetchStrokeGuide, wxLogin } = require("../../utils/api");
 
 /** 小程序 2D Canvas 节点选择器。 */
 const WRITING_CANVAS_SELECTOR = "#writingCanvas";
@@ -15,6 +15,9 @@ const POEM_DRAW_LINE_WIDTH = 9;
 /** 用户中心中笔顺纠错开关的本地存储键。 */
 const STROKE_VALIDATION_STORAGE_KEY = "hanziStrokeValidationEnabled";
 
+/** 微信登录用户的本地缓存键，用于跨次启动免重新登录。 */
+const WX_LOGIN_USER_STORAGE_KEY = "wxLoginUser";
+
 /** 笔顺演示速度的本地存储键。 */
 const STROKE_DEMO_SPEED_STORAGE_KEY = "hanziStrokeDemoSpeed";
 
@@ -24,20 +27,21 @@ const STROKE_DEMO_SPEED_DEFAULT = 100;
 const STROKE_DEMO_SPEED_MAX = 200;
 const STROKE_DEMO_SPEED_STEP = 25;
 
-/** 本地笔顺校验相对于当前标准笔画尺度的容差比例。 */
-const STROKE_START_TOLERANCE_RATIO = 0.2;
-const STROKE_END_TOLERANCE_RATIO = 0.22;
-const STROKE_PATH_TOLERANCE_RATIO = 0.12;
-const STROKE_DIRECTION_MARGIN_RATIO = 0.08;
-
 /**
- * 短笔画相对于练字 Canvas 短边的最低容差比例。
+ * 归一化形状空间内的笔顺校验容差。
  *
- * 点、提等短笔画自身长度很小，如果只按笔画长度计算容差，模拟器缩放、手指
- * 接触面积和轻微抖动会把允许误差压缩到约 10px，导致按演示书写仍被误判。
+ * alignStrokeForCompare 会把用户轨迹与标准轨迹各自按质心对齐、按外接矩形
+ * 长边归一化到单位 1（坐标落入约 [-0.5, 0.5]）。容差在该空间内设定，
+ * 不再依赖绝对像素，避免“字体预览位置”与“Hanzi Writer 坐标”不一致导致
+ * 写对仍误判；同时保持与原像素级相当的严格度。
  */
-const STROKE_POSITION_MIN_TOLERANCE_RATIO = 0.09;
-const STROKE_PATH_MIN_TOLERANCE_RATIO = 0.07;
+const STROKE_NORMALIZED_START_TOLERANCE = 0.16;
+const STROKE_NORMALIZED_END_TOLERANCE = 0.18;
+const STROKE_NORMALIZED_PATH_TOLERANCE = 0.14;
+const STROKE_NORMALIZED_DIRECTION_MARGIN = 0.06;
+const STROKE_NORMALIZED_MIN_LENGTH = 0.12;
+const STROKE_LENGTH_RATIO_MIN = 0.5;
+const STROKE_LENGTH_RATIO_MAX = 2.0;
 
 /** 单次绘制动画的兜底延迟，兼容不支持 canvas.requestAnimationFrame 的基础库。 */
 const FALLBACK_FRAME_DELAY_MS = 16;
@@ -77,6 +81,8 @@ Page({
     ],
     bootstrapLoading: true,
     bootstrapError: "",
+    loginVisible: false,
+    loginLoading: false,
     currentStudent: null,
     users: [],
     consecutiveDays: 0,
@@ -142,6 +148,7 @@ Page({
     this.canvasSize = { width: 0, height: 0 };
     this.canvasRect = { left: 0, top: 0 };
     this.lastPoint = null;
+    this.lastMidPoint = null;
     this.pendingPoint = null;
     this.currentStrokePoints = [];
     this.acceptedStrokePaths = [];
@@ -163,10 +170,13 @@ Page({
     this.poemIsDrawing = false;
     this.poemLastPoint = null;
     this.poemPracticeStartedAt = 0;
+    // 读取本地登录态：有缓存则免登录直接进入，没有则展示登录引导层。
+    this.cachedLoginUser = wx.getStorageSync(WX_LOGIN_USER_STORAGE_KEY) || null;
     this.setData({
       strokeValidationEnabled: storedValidationSetting !== false,
       strokeDemoSpeed: storedStrokeDemoSpeed,
       strokeDemoSpeedLabel: formatStrokeDemoSpeedLabel(storedStrokeDemoSpeed),
+      loginVisible: !this.cachedLoginUser,
     }, () => this.syncDerivedState());
     this.loadBootstrapData();
   },
@@ -260,6 +270,69 @@ Page({
    * @returns {void} 无返回值。
    */
   noop() {},
+
+  /**
+   * 触发微信登录。
+   *
+   * <p>并发获取 wx.login 的 code 与 wx.getUserProfile 的用户资料，发送给后端
+   * 换取 openid 识别或新建的学生用户；成功后写入本地缓存并关闭登录引导层。
+   * wx.getUserProfile 在用户拒绝授权或基础库不支持时使用空资料兜底，
+   * 后端会用默认昵称“同学”兜底，保证登录流程不被打断。</p>
+   *
+   * @returns {void} 无返回值。
+   */
+  handleWxLogin() {
+    if (this.data.loginLoading) {
+      return;
+    }
+    this.setData({ loginLoading: true });
+
+    const loginCode = new Promise((resolve, reject) => {
+      wx.login({
+        success: (res) => (res && res.code ? resolve(res.code) : reject(new Error("微信登录凭证获取失败"))),
+        fail: () => reject(new Error("微信登录凭证获取失败")),
+      });
+    });
+    const userProfile = new Promise((resolve) => {
+      if (typeof wx.getUserProfile !== "function") {
+        resolve({});
+        return;
+      }
+      wx.getUserProfile({
+        desc: "用于展示练字昵称",
+        success: (res) => resolve((res && res.userInfo) || {}),
+        fail: () => resolve({}),
+      });
+    });
+
+    Promise.all([loginCode, userProfile])
+      .then(([code, userInfo]) => wxLogin(code, {
+        nickname: userInfo.nickName || "",
+        avatarUrl: userInfo.avatarUrl || "",
+      }))
+      .then((user) => {
+        this.cachedLoginUser = user;
+        wx.setStorageSync(WX_LOGIN_USER_STORAGE_KEY, user);
+        this.setData({ loginVisible: false, loginLoading: false }, () => this.syncDerivedState());
+        wx.showToast({ title: "登录成功", icon: "success" });
+      })
+      .catch((error) => {
+        console.warn("微信登录失败。", error);
+        this.setData({ loginLoading: false });
+        wx.showToast({ title: (error && error.message) || "登录失败，请重试", icon: "none" });
+      });
+  },
+
+  /**
+   * 退出登录并重新展示登录引导层。
+   *
+   * @returns {void} 无返回值。
+   */
+  logout() {
+    this.cachedLoginUser = null;
+    wx.removeStorageSync(WX_LOGIN_USER_STORAGE_KEY);
+    this.setData({ loginVisible: true }, () => this.syncDerivedState());
+  },
 
   /**
    * 切换用户中心中的实时笔顺纠错设置。
@@ -463,6 +536,8 @@ Page({
     }
     this.canvasContext.beginPath();
     this.canvasContext.moveTo(point.x, point.y);
+    // 增量绘制起点：落笔瞬间把上一中点锚定到起笔点，保证首段从中点法平滑过渡。
+    this.lastMidPoint = point;
   },
 
   /**
@@ -506,6 +581,7 @@ Page({
       : evaluateStrokeAttempt(attemptedPoints, expectedMedian, this.canvasSize.width, this.canvasSize.height);
     this.isDrawing = false;
     this.lastPoint = null;
+    this.lastMidPoint = null;
     this.pendingPoint = null;
     this.currentStrokePoints = [];
 
@@ -559,6 +635,7 @@ Page({
     this.cancelPendingFrame();
     this.isDrawing = false;
     this.lastPoint = null;
+    this.lastMidPoint = null;
     this.pendingPoint = null;
     this.currentStrokePoints = [];
     this.acceptedStrokePaths = [];
@@ -899,20 +976,30 @@ Page({
   /**
    * 绘制当前待处理触摸点。
    *
+   * <p>每次只绘制上一中点到当前中点的一小段二次贝塞尔曲线，并立即 stroke。
+   * 这样单帧渲染成本恒定，不会随笔画变长而累积重绘整条路径，避免越写越卡；
+   * 中点法同时保证连续段之间平滑过渡、无明显棱角。</p>
+   *
    * @returns {void} 无返回值。
    */
   paintPendingPoint() {
-    if (!this.canvasReady || !this.lastPoint || !this.pendingPoint) {
+    if (!this.canvasReady || !this.lastPoint || !this.pendingPoint || !this.canvasContext) {
       return;
     }
 
+    const last = this.lastPoint;
+    const next = this.pendingPoint;
     const midPoint = {
-      x: (this.lastPoint.x + this.pendingPoint.x) / 2,
-      y: (this.lastPoint.y + this.pendingPoint.y) / 2,
+      x: (last.x + next.x) / 2,
+      y: (last.y + next.y) / 2,
     };
-    this.canvasContext.quadraticCurveTo(this.lastPoint.x, this.lastPoint.y, midPoint.x, midPoint.y);
+    const startPoint = this.lastMidPoint || last;
+    this.canvasContext.beginPath();
+    this.canvasContext.moveTo(startPoint.x, startPoint.y);
+    this.canvasContext.quadraticCurveTo(last.x, last.y, midPoint.x, midPoint.y);
     this.canvasContext.stroke();
-    this.lastPoint = this.pendingPoint;
+    this.lastMidPoint = midPoint;
+    this.lastPoint = next;
     this.hasDrawnSegment = true;
   },
 
@@ -1292,7 +1379,7 @@ Page({
     const hanziList = this.data.hanziList;
     const poemList = this.data.poemList;
     const taskList = this.data.taskList;
-    const currentStudent = findCurrentStudent(this.data.users);
+    const currentStudent = findCurrentStudent(this.data.users, this.cachedLoginUser);
     const studentRecords = filterStudentRecords(this.data.practiceRecords, currentStudent);
     const activeTasks = taskList
       .filter((task) => !task.status || task.status === "active")
@@ -1380,11 +1467,19 @@ function formatTask(task, hanziList, poemList) {
 /**
  * 查找当前学生用户。
  *
+ * <p>已微信登录时优先用缓存登录用户（并尝试以最新 users 列表刷新其字段）；
+ * 未登录时回退到 users 中第一个学生，保持旧首页可访问。</p>
+ *
  * @param {Array<object>} users 用户列表。
+ * @param {object} cachedLoginUser 本地缓存的微信登录用户。
  * @returns {object} 当前学生；没有学生数据时返回空对象。
  */
-function findCurrentStudent(users) {
-  return users.find((user) => user.user_type === "student") || {};
+function findCurrentStudent(users, cachedLoginUser) {
+  if (cachedLoginUser && cachedLoginUser.id) {
+    const matched = toArraySafe(users).find((user) => user.id === cachedLoginUser.id);
+    return matched || cachedLoginUser;
+  }
+  return toArraySafe(users).find((user) => user.user_type === "student") || {};
 }
 
 /**
@@ -1606,8 +1701,11 @@ function appendDistinctPoint(points, point) {
 /**
  * 校验用户单笔轨迹是否匹配当前应写笔画。
  *
- * <p>校验同时看起点、终点、方向和整体贴合度。这样可以捕捉“写错笔画”
- * 与“倒着写”的主要问题，同时避免要求儿童笔迹完全贴合标准字形。</p>
+ * <p>用户轨迹与标准中线先各自调用 alignStrokeForCompare 归一化到统一形状
+ * 空间（质心对齐 + 长边归一化），再比较起点、终点、方向和整体贴合度。
+ * 这样校验只关心笔画的方向与形状，不再受“字体预览位置”与“Hanzi Writer
+ * 坐标”不一致的绝对像素偏差影响——照田字格写对方向和形状即可通过，
+ * 同时仍能拦截“写错笔画”与“倒着写”。</p>
  *
  * @param {Array<{x:number,y:number}>} attemptedPoints 用户当前一笔采集到的 Canvas 坐标。
  * @param {Array<Array<number>>} expectedMedian Hanzi Writer 当前笔的标准中线。
@@ -1618,24 +1716,6 @@ function appendDistinctPoint(points, point) {
 function evaluateStrokeAttempt(attemptedPoints, expectedMedian, canvasWidth, canvasHeight) {
   const userPoints = normalizeCanvasPoints(attemptedPoints);
   const expectedPoints = transformMedianToCanvas(expectedMedian, canvasWidth, canvasHeight);
-  const validationScale = getStrokeValidationScale(expectedPoints, canvasWidth, canvasHeight);
-  const canvasReferenceSize = Math.max(Math.min(Number(canvasWidth) || 0, Number(canvasHeight) || 0), 1);
-  // 长笔画沿用自身尺度，短笔画增加画布级下限，在宽松容错与错误轨迹拦截之间取较大值。
-  const startTolerance = Math.max(
-    10,
-    validationScale * STROKE_START_TOLERANCE_RATIO,
-    canvasReferenceSize * STROKE_POSITION_MIN_TOLERANCE_RATIO,
-  );
-  const endTolerance = Math.max(
-    10,
-    validationScale * STROKE_END_TOLERANCE_RATIO,
-    canvasReferenceSize * STROKE_POSITION_MIN_TOLERANCE_RATIO,
-  );
-  const pathTolerance = Math.max(
-    10,
-    validationScale * STROKE_PATH_TOLERANCE_RATIO,
-    canvasReferenceSize * STROKE_PATH_MIN_TOLERANCE_RATIO,
-  );
 
   if (userPoints.length < 2) {
     return { valid: false, message: "这一笔太短了，请按标准起笔方向重新写。" };
@@ -1644,34 +1724,72 @@ function evaluateStrokeAttempt(attemptedPoints, expectedMedian, canvasWidth, can
     return { valid: false, message: "当前笔顺数据暂不可用，请稍后重试。" };
   }
 
-  const expectedLength = calculatePolylineLength(expectedPoints);
-  const userLength = calculatePolylineLength(userPoints);
-  const lengthRatio = expectedLength > 0 ? userLength / expectedLength : 0;
-  const forwardDistance = calculateAverageTrackDistance(userPoints, expectedPoints);
-  const reverseDistance = calculateAverageTrackDistance(userPoints, expectedPoints.slice().reverse());
-  const startDistance = distanceBetweenPoints(userPoints[0], expectedPoints[0]);
-  const endDistance = distanceBetweenPoints(userPoints[userPoints.length - 1], expectedPoints[expectedPoints.length - 1]);
+  const normalizedUser = alignStrokeForCompare(userPoints);
+  const normalizedExpected = alignStrokeForCompare(expectedPoints);
 
-  if (!Number.isFinite(userLength) || userLength < validationScale * 0.18) {
+  const expectedLength = calculatePolylineLength(normalizedExpected);
+  const userLength = calculatePolylineLength(normalizedUser);
+  const lengthRatio = expectedLength > 0 ? userLength / expectedLength : 0;
+  const forwardDistance = calculateAverageTrackDistance(normalizedUser, normalizedExpected);
+  const reverseDistance = calculateAverageTrackDistance(normalizedUser, normalizedExpected.slice().reverse());
+  const startDistance = distanceBetweenPoints(normalizedUser[0], normalizedExpected[0]);
+  const endDistance = distanceBetweenPoints(
+    normalizedUser[normalizedUser.length - 1],
+    normalizedExpected[normalizedExpected.length - 1],
+  );
+
+  if (!Number.isFinite(userLength) || userLength < STROKE_NORMALIZED_MIN_LENGTH) {
     return { valid: false, message: "这一笔太短了，请沿着示范完整写出。" };
   }
-  if (lengthRatio < 0.38 || lengthRatio > 2.4) {
+  if (lengthRatio < STROKE_LENGTH_RATIO_MIN || lengthRatio > STROKE_LENGTH_RATIO_MAX) {
     return { valid: false, message: "这一笔长度差异太大，请重新书写。" };
   }
-  if (startDistance > startTolerance) {
+  if (startDistance > STROKE_NORMALIZED_START_TOLERANCE) {
     return { valid: false, message: "起笔位置不对，请看准这一笔的开头再写。" };
   }
-  if (reverseDistance + Math.max(6, validationScale * STROKE_DIRECTION_MARGIN_RATIO) < forwardDistance) {
+  if (reverseDistance + STROKE_NORMALIZED_DIRECTION_MARGIN < forwardDistance) {
     return { valid: false, message: "这一笔方向反了，请按笔顺从起笔处写到收笔处。" };
   }
-  if (endDistance > endTolerance) {
+  if (endDistance > STROKE_NORMALIZED_END_TOLERANCE) {
     return { valid: false, message: "收笔位置偏差较大，请沿着这一笔写完整。" };
   }
-  if (forwardDistance > pathTolerance) {
+  if (forwardDistance > STROKE_NORMALIZED_PATH_TOLERANCE) {
     return { valid: false, message: "笔画轨迹偏离较多，请贴近示范笔画重新写。" };
   }
 
   return { valid: true, message: "当前笔画校验通过。" };
+}
+
+/**
+ * 把单笔轨迹归一化到统一形状空间。
+ *
+ * <p>以质心为原点、以外接矩形长边为单位长度，使后续比较脱离绝对像素位置，
+ * 只关注笔画的方向与形状。用户照田字格或字体预览书写时，只要形状方向与
+ * 标准笔画一致即可通过，不再因坐标系不一致被误判。</p>
+ *
+ * @param {Array<{x:number,y:number}>} points Canvas 坐标点。
+ * @returns {Array<{x:number,y:number}>} 归一化后的点列表；输入为空时返回空数组。
+ */
+function alignStrokeForCompare(points) {
+  const safePoints = toArraySafe(points);
+  if (!safePoints.length) {
+    return [];
+  }
+
+  let sumX = 0;
+  let sumY = 0;
+  safePoints.forEach((point) => {
+    sumX += Number(point && point.x) || 0;
+    sumY += Number(point && point.y) || 0;
+  });
+  const centroid = { x: sumX / safePoints.length, y: sumY / safePoints.length };
+  const bounds = getPolylineBounds(safePoints);
+  const size = Math.max(bounds.width, bounds.height, 1);
+
+  return safePoints.map((point) => ({
+    x: (Number(point.x) - centroid.x) / size,
+    y: (Number(point.y) - centroid.y) / size,
+  }));
 }
 
 /**
@@ -2323,20 +2441,6 @@ function distanceBetweenPoints(start, end) {
  */
 function clampProgress(progress) {
   return Math.max(0, Math.min(1, Number(progress) || 0));
-}
-
-/**
- * 计算当前笔画校验所需的参考尺度。
- *
- * @param {Array<{x:number,y:number}>} expectedPoints 标准中线点。
- * @param {number} canvasWidth Canvas 宽度。
- * @param {number} canvasHeight Canvas 高度。
- * @returns {number} 用于设定容差的尺度值。
- */
-function getStrokeValidationScale(expectedPoints, canvasWidth, canvasHeight) {
-  const bounds = getPolylineBounds(expectedPoints);
-  const diagonal = Math.sqrt(bounds.width * bounds.width + bounds.height * bounds.height);
-  return Math.max(diagonal, calculatePolylineLength(expectedPoints), Math.min(canvasWidth, canvasHeight) * 0.12, 24);
 }
 
 /**

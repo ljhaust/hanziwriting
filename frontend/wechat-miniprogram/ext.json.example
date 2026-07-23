@@ -1,0 +1,8 @@
+{
+  "extEnable": true,
+  "extAppid": "wx33e3c288d2f0db88",
+  "directCommit": false,
+  "ext": {
+    "apiBaseUrl": "http://127.0.0.1:8080"
+  }
+}

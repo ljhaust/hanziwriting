@@ -1,60 +1,14 @@
-import { networkInterfaces } from 'node:os';
 import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite';
 
 /**
- * 获取当前电脑在局域网中的 IPv4 地址。
+ * 管理端 Vite 构建配置。
  *
- * @returns {string | null} 找到可供手机访问的局域网地址时返回 IP，否则返回 null。
+ * 业务意图：本工程只承载 Vue 3 管理后台，因此仅注册 Vue 单文件组件插件，
+ * 不再保留为多端原型服务的局域网分享中间件。后端接口地址通过
+ * `frontend/.env.local` 的 `VITE_API_BASE_URL` 指定，请求层会自行拼接 `/api`，
+ * 这里不配置反向代理或跨端口转发。
  */
-function getLanAddress() {
-  const interfaces = networkInterfaces();
-  for (const interfaceItems of Object.values(interfaces)) {
-    for (const item of interfaceItems || []) {
-      if (item.family === 'IPv4' && !item.internal) {
-        return item.address;
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * 注册分享地址接口。
- *
- * @param {{ middlewares: { use: Function }, config?: { server?: { https?: boolean } } }} server Vite 开发或预览服务器。
- * @returns {void} 无返回值，方法会把接口挂到 Vite 中间件上。
- */
-function registerShareUrlEndpoint(server) {
-  server.middlewares.use('/share-url', (request, response) => {
-    const lanAddress = getLanAddress();
-    const hostHeader = request.headers.host || '';
-    const port = hostHeader.includes(':') ? hostHeader.split(':').pop() : '';
-    const protocol = server.config?.server?.https ? 'https' : 'http';
-    const shareUrl = lanAddress && port ? `${protocol}://${lanAddress}:${port}/` : null;
-
-    response.setHeader('Content-Type', 'application/json; charset=utf-8');
-    response.end(JSON.stringify({ shareUrl }));
-  });
-}
-
 export default defineConfig({
-  server: {
-    host: '0.0.0.0',
-  },
-  preview: {
-    host: '0.0.0.0',
-  },
-  plugins: [
-    vue(),
-    {
-      name: 'local-share-url',
-      configureServer(server) {
-        registerShareUrlEndpoint(server);
-      },
-      configurePreviewServer(server) {
-        registerShareUrlEndpoint(server);
-      },
-    },
-  ],
+  plugins: [vue()],
 });

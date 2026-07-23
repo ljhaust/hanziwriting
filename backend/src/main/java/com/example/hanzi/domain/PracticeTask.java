@@ -37,10 +37,10 @@ public class PracticeTask {
     /** 投放对象 ID。 */
     private String targetId;
 
-    /** 开始时间文本，原型阶段使用 yyyy-MM-dd HH:mm。 */
+    /** 开始时间文本，业务格式 yyyy-MM-dd HH:mm。 */
     private String startTime;
 
-    /** 结束时间文本，原型阶段使用 yyyy-MM-dd HH:mm。 */
+    /** 结束时间文本，业务格式 yyyy-MM-dd HH:mm。 */
     private String endTime;
 
     /** 状态：not_started、active、ended。 */

@@ -11,6 +11,9 @@ const BOOTSTRAP_PATH = "/api/bootstrap";
 /** 练习记录接口路径。 */
 const RECORDS_PATH = "/api/records";
 
+/** 微信小程序登录接口路径。 */
+const WX_LOGIN_PATH = "/api/auth/wx-login";
+
 /** 本地开发请求超时时间，避免后端不可用时页面长时间停留在加载态。 */
 const REQUEST_TIMEOUT_MS = 5000;
 
@@ -37,6 +40,24 @@ function createPracticeRecord(record) {
     method: "POST",
     data: record,
   }).then((payload) => normalizeRecord(payload));
+}
+
+/**
+ * 使用 wx.login 的 code 完成微信登录。
+ *
+ * @param {string} code wx.login 返回的临时登录凭证。
+ * @param {{nickname?:string,avatarUrl?:string}} profile wx.getUserProfile 返回的可选资料。
+ * @returns {Promise<object>} 后端按 openid 识别或新建的当前学生用户。
+ */
+function wxLogin(code, profile = {}) {
+  return requestJson(WX_LOGIN_PATH, {
+    method: "POST",
+    data: {
+      code,
+      nickname: profile.nickname || "",
+      avatarUrl: profile.avatarUrl || "",
+    },
+  }).then((payload) => normalizeUser(payload));
 }
 
 /**
@@ -297,4 +318,5 @@ module.exports = {
   fetchBootstrapData,
   fetchStrokeGuide,
   normalizeBootstrapData,
+  wxLogin,
 };

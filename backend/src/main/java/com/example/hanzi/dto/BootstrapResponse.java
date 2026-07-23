@@ -30,10 +30,10 @@ public class BootstrapResponse {
     private List<PracticeRecord> records;
 
     /**
-     * Jackson 与 Redis 缓存反序列化使用的无参构造。
+     * 无参构造。
      *
-     * <p>Spring Cache 会把该对象写入 Redis，后续命中缓存时需要先通过
-     * 无参构造创建对象，再通过 setter 还原字段。</p>
+     * <p>Spring Boot 在反序列化请求体或框架内部重建对象时需要无参构造，
+     * 业务代码应使用全参构造直接组装聚合数据。</p>
      */
     public BootstrapResponse() {
     }

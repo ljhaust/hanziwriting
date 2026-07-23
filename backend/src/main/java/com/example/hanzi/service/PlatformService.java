@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -42,6 +43,8 @@ public class PlatformService {
     private static final String DEFAULT_ENABLED_STATUS = "enabled";
     private static final String ADMIN_USER_TYPE = "admin";
     private static final String TEACHER_USER_TYPE = "teacher";
+    private static final String DEFAULT_STUDENT_USER_TYPE = "student";
+    private static final String DEFAULT_WX_NICKNAME = "同学";
     private static final String DEFAULT_ACTIVE_TASK_STATUS = "active";
     private static final long DEFAULT_TASK_DURATION_HOURS = 24L;
     private static final DateTimeFormatter BUSINESS_TIME_FORMATTER =
@@ -83,8 +86,8 @@ public class PlatformService {
     /**
      * 查询前端首屏所需数据。
      *
-     * <p>该接口直接返回 JPA 聚合数据，不放入 Redis 缓存，避免 Hibernate 懒加载代理
-     * 被序列化后在后续命中缓存时反序列化失败。后续如需缓存，应先转换为纯 DTO 快照。</p>
+     * <p>该接口直接返回 JPA 聚合数据，当前未引入缓存层。若未来需要缓存，应先将
+     * 实体转换为纯 DTO 快照，避免 Hibernate 懒加载代理被序列化后在命中缓存时反序列化失败。</p>
      *
      * @return 管理端和小程序共用的数据库聚合数据。
      */
@@ -130,6 +133,33 @@ public class PlatformService {
             throw new InvalidCredentialsException();
         }
         return user;
+    }
+
+    /**
+     * 使用微信 openid 完成小程序登录。
+     *
+     * <p>openid 命中已有用户则直接返回，未命中则按学生身份新建并写入 openid。
+     * 昵称缺省时使用兜底昵称，保证新增账号展示字段非空。头像地址当前不在
+     * user_account 持久化，仅保留入参为后续扩展预留。</p>
+     *
+     * @param openid 由 code2session 换取的微信 openid。
+     * @param nickname wx.getUserProfile 返回的昵称，可能为空。
+     * @param avatarUrl wx.getUserProfile 返回的头像地址，当前未持久化。
+     * @return 命中或新建后的用户，密码摘要不会被序列化。
+     */
+    @Transactional
+    public UserAccount loginByOpenid(String openid, String nickname, String avatarUrl) {
+        Optional<UserAccount> existing = userRepository.findByOpenid(openid);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        UserAccount user = new UserAccount();
+        user.setUsername("wx_" + (openid == null ? "" : openid));
+        user.setNickname(isBlank(nickname) ? DEFAULT_WX_NICKNAME : nickname);
+        user.setUserType(DEFAULT_STUDENT_USER_TYPE);
+        user.setOpenid(openid);
+        return saveUser(user);
     }
 
     /**

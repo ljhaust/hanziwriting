@@ -6,8 +6,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * 汉字书写与古诗背诵平台后端启动类。
  *
- * <p>输入是 JVM 启动参数和 Spring Boot 配置，输出是一个提供 REST API、
- * MySQL 持久化和 Redis 缓存能力的应用进程。</p>
+ * <p>输入是 JVM 启动参数和 Spring Boot 配置，输出是一个提供 REST API 和
+ * MySQL 持久化能力的应用进程。</p>
  */
 @SpringBootApplication
 public class HanziWritingApplication {

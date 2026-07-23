@@ -23,6 +23,39 @@
 4. 小程序提交练字或背诗结果时调用 `POST /api/records`，仅在接口成功后更新记录页。
 5. 小程序演示或校验笔顺时调用 `GET /api/hanzi/{characterText}/strokes`，轨迹来自 `hanzi_character` 表中的 JSON 字段。
 
+## 调用链路与代码位置
+
+一次「前端 → 后台 → 数据库」的请求在各层都有明确的代码入口，便于排查与扩展。
+
+**管理端读取数据**
+
+```text
+AdminDashboard.vue                     展示 platform.users / hanziDb 等响应式集合
+   └─ usePlatformState.js#reload       调用 fetchBootstrapData；失败时清空集合并写入 loadError
+        └─ src/api/client.js#request   拼接 VITE_API_BASE_URL + /api/bootstrap，统一超时与错误归一
+             └─ HTTP GET /api/bootstrap
+                  └─ PlatformController#bootstrap
+                       └─ PlatformService#bootstrap   @Transactional(readOnly = true)
+                            └─ 五个 JpaRepository#findAll
+                                 └─ MySQL：user_account / hanzi_character / poem / practice_task / practice_record
+```
+
+**小程序读取数据**
+
+```text
+pages/index/index.js#loadBootstrapData      设置 bootstrapLoading，成功后 syncDerivedState
+   └─ utils/api.js#fetchBootstrapData       GET /api/bootstrap 后 normalizeBootstrapData 归一字段
+        └─ utils/api.js#requestJson         wx.request，地址取 app.js 的 globalData.apiBaseUrl
+             └─ HTTP GET /api/bootstrap
+                  └─ 同一后端控制器 → JPA → MySQL
+```
+
+**三条主链路时序**
+
+- **首屏加载**：两端启动 → `GET /api/bootstrap` → 五集合 → 渲染列表。
+- **写操作**（新增 / 状态切换 / 删除）：前端调用对应写接口 → 后端持久化 → 返回已保存实体 → 前端以响应更新本地集合，不本地造数。
+- **笔顺演示 / 纠错**：小程序 `utils/api.js#fetchStrokeGuide` → `GET /api/hanzi/{字}/strokes` → 后端解析数据库三列 JSON → 小程序 Canvas 绘制。
+
 ## 目录结构
 
 ```text
@@ -87,14 +120,18 @@ mysql -u root -p hanzi_writing < backend/src/main/resources/db/mysql/seed.sql
 
 ## 2. 配置并启动后端
 
-不要把数据库密码写入仓库。当前 `local` profile 要求通过以下环境变量注入连接信息：
+不要把数据库密码写入仓库。首次本地调试时复制配置示例，并只在被 Git 忽略的
+`backend/.env.local` 中填写本机连接信息：
 
 ```bash
-export HANZI_DB_URL='jdbc:mysql://127.0.0.1:3306/hanzi_writing?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true'
-export HANZI_DB_USERNAME='你的数据库账号'
-export HANZI_DB_PASSWORD='你的数据库密码'
-export HANZI_CORS_ALLOWED_ORIGINS='http://localhost:5173,http://127.0.0.1:5173'
+cd backend
+cp .env.local.example .env.local
+# 编辑 .env.local，替换数据库账号、密码以及需要使用的微信 Secret
 ```
+
+`local` profile 会在每次启动时自动读取该文件，不需要重复执行 `export`。从
+`backend` 目录启动或从仓库根目录使用 `mvn -f backend/pom.xml ...` 启动均可加载。
+系统环境变量的优先级更高，仍可用于临时覆盖本地文件中的同名配置。
 
 启动后端：
 
@@ -103,11 +140,8 @@ cd backend
 MAVEN_OPTS='-Dfile.encoding=UTF-8' mvn spring-boot:run
 ```
 
-默认端口为 `8080`。如需修改，可额外设置：
-
-```bash
-export SERVER_PORT='8081'
-```
+默认端口为 `8080`。如需长期修改，直接调整 `backend/.env.local` 中的
+`SERVER_PORT`；如需单次覆盖，也可在启动前设置同名环境变量。
 
 常用环境变量：
 
@@ -115,7 +149,7 @@ export SERVER_PORT='8081'
 | --- | --- | --- |
 | `HANZI_DB_URL` | MySQL JDBC 地址 | 明确数据库名、时区和字符集 |
 | `HANZI_DB_USERNAME` | MySQL 用户名 | 使用最小权限账号 |
-| `HANZI_DB_PASSWORD` | MySQL 密码 | 只通过环境变量或密钥服务注入 |
+| `HANZI_DB_PASSWORD` | MySQL 密码 | 只写入被 Git 忽略的本地配置、环境变量或密钥服务 |
 | `HANZI_CORS_ALLOWED_ORIGINS` | 管理端浏览器来源白名单 | 多个来源用英文逗号分隔 |
 | `SERVER_PORT` | 后端监听端口 | 默认 `8080` |
 
@@ -136,10 +170,11 @@ cd frontend
 npm install
 ```
 
-创建仅用于本机的 `frontend/.env.local`：
+首次使用时从示例创建仅用于本机的 `frontend/.env.local`，后续启动会由 Vite 自动读取：
 
 ```bash
-VITE_API_BASE_URL=http://127.0.0.1:8080
+cd frontend
+cp .env.local.example .env.local
 ```
 
 启动开发服务：
@@ -164,14 +199,24 @@ npm run dev
 frontend/wechat-miniprogram
 ```
 
-小程序 API 地址由 `frontend/wechat-miniprogram/app.js` 的 `globalData.apiBaseUrl` 管理，也可通过 `ext.json` 的 `apiBaseUrl` 覆盖。仓库默认留空，避免把某个环境地址写死到业务代码。
+小程序 API 地址按以下优先级读取：发行环境 `ext.json`、被 Git 忽略的本地
+`local-config.js`、`app.js` 的 `globalData.apiBaseUrl`。微信开发者工具模拟器
+可能不会注入 `ext.json`，因此本地联调应首次复制 `local-config.example.js`：
 
-开发者工具模拟器联调时，可按本机实际端口设置：
+```bash
+cd frontend/wechat-miniprogram
+cp local-config.example.js local-config.js
+```
 
-```js
-globalData: {
-  apiBaseUrl: "http://127.0.0.1:8080",
-},
+`local-config.js` 已被 Git 忽略，后续打开开发者工具会自动沿用。发行环境仍可
+使用 `ext.json` 覆盖该地址，示例结构如下：
+
+```json
+{
+  "ext": {
+    "apiBaseUrl": "http://127.0.0.1:8080"
+  }
+}
 ```
 
 真机调试时不能使用 `localhost` 或 `127.0.0.1` 指向开发电脑，应改为电脑局域网地址，例如 `http://192.168.x.x:8080`，并确保：
@@ -223,6 +268,70 @@ curl -i -X POST http://127.0.0.1:8080/api/records \
   -d '{"user_id":"数据库中的学生 ID","item_type":"hanzi","item_id":"数据库中的汉字 ID","item_name":"书","complete_status":"completed","stroke_total":4,"stroke_completed":4,"mistake_count":0,"hint_count":0,"duration_seconds":60,"practice_time":"2026-07-21 10:00"}'
 ```
 
+## 接口字段速查
+
+以下为关键接口的请求体与响应体示例（字段命名遵循 `snake_case`）。完整接口见上方「REST API 清单」。
+
+### GET /api/bootstrap
+
+响应顶层固定五个数组，前端据此填充首屏：
+
+```json
+{
+  "users":   [ { "id": "U101", "username": "admin", "nickname": "张系统管理员", "user_type": "admin", "status": "enabled", "join_date": "2026-01-01" } ],
+  "hanzi":   [ { "id": "H001", "character_text": "书", "pinyin": "shū", "radical": "乛", "stroke_count": 4, "grade_level": "一年级", "is_recommended": true, "tags": ["基础生字"], "strokes_desc": ["横折","横折钩","竖","点"], "compounds": ["书本","书写"] } ],
+  "poems":   [ { "id": "P001", "title": "静夜思", "author": "李白", "dynasty": "唐", "content": "床前明月光……", "translation": "……", "grade_level": "一年级", "keywords": ["思乡"], "sentences": [ { "id": "S101", "sentence_text": "床前明月光", "sort_no": 1, "key_characters": ["明","月"] } ] } ],
+  "tasks":   [ { "id": "T501", "task_name": "今日生字", "task_type": "hanzi", "target_type": "all", "target_id": "", "start_time": "2026-07-21 09:00", "end_time": "2026-07-22 09:00", "status": "active", "items": [ { "id": "TI50101", "item_type": "hanzi", "item_id": "H001", "sort_no": 1 } ] } ],
+  "records": [ { "id": "R901", "user_id": "U104", "user_name": "李梓轩", "task_name": "今日生字", "item_type": "hanzi", "item_id": "H001", "item_name": "书", "complete_status": "completed", "stroke_total": 4, "stroke_completed": 4, "mistake_count": 0, "hint_count": 0, "score_level": "A+", "duration_seconds": 60, "practice_time": "2026-07-21 10:00" } ]
+}
+```
+
+> 笔顺轨迹列 `strokes_json` / `medians_json` / `rad_strokes_json` 标注了 `@JsonIgnore`，不会出现在 bootstrap 响应里，只能通过下方笔顺接口获取。
+
+### POST /api/auth/login
+
+请求体：
+
+```json
+{ "username": "admin", "password": "明文密码（仅用于本次 BCrypt 比对）" }
+```
+
+成功响应（HTTP 200，不含 `password_hash`）：
+
+```json
+{ "id": "U101", "username": "admin", "nickname": "张系统管理员", "user_type": "admin", "status": "enabled", "join_date": "2026-01-01" }
+```
+
+账号、密码、角色或状态任一不符返回 HTTP 401，响应体为 `账号或密码不正确`，不区分具体失败原因。
+
+### POST /api/users
+
+请求体（主键、状态、注册日期可省略，由后端生成）：
+
+```json
+{ "username": "student_xuan", "nickname": "李梓轩", "phone": "18655556666", "user_type": "student" }
+```
+
+### POST /api/records
+
+请求体（小程序提交练字或背诗结果）：
+
+```json
+{ "user_id": "U104", "user_name": "李梓轩", "item_type": "hanzi", "item_id": "H001", "item_name": "书", "task_name": "今日生字", "complete_status": "completed", "stroke_total": 4, "stroke_completed": 4, "mistake_count": 0, "hint_count": 0, "score_level": "A+", "duration_seconds": 60, "practice_time": "2026-07-21 10:00" }
+```
+
+成功后返回持久化后的完整记录（含服务端生成的主键）。
+
+### GET /api/hanzi/{characterText}/strokes
+
+响应（轨迹均来自数据库三列 JSON）：
+
+```json
+{ "character_text": "书", "strokes": ["M 364 ... Z"], "medians": [[[350,260],[400,260]]], "radStrokes": [0] }
+```
+
+汉字不存在或三列任一未配置返回 HTTP 404；列内容不是合法 JSON 数组返回 HTTP 500。
+
 ## 构建与验证
 
 管理端构建：
@@ -256,6 +365,29 @@ find frontend/wechat-miniprogram -name '*.js' -print0 | xargs -0 -n1 node --chec
 6. 模拟保存接口失败，确认记录页没有新增未持久化记录。
 
 ## 常见故障排查
+
+### 通用排查命令速查
+
+定位问题前先逐条执行，多数联调故障可在这一步定位：
+
+```bash
+# 1. 后端进程与端口
+lsof -i:8080 | grep LISTEN                       # 后端是否在监听 8080
+curl -i http://127.0.0.1:8080/api/bootstrap      # 聚合接口是否返回 200
+
+# 2. 数据库连通与数据
+mysql -u 用户名 -p -e "SELECT 1;"                 # MySQL 是否可连
+mysql -u 用户名 -p hanzi_writing -e "SHOW TABLES;"            # 表是否已建
+mysql -u 用户名 -p hanzi_writing -e "SELECT id, character_text, stroke_count FROM hanzi_character;"
+
+# 3. 笔顺轨迹三列是否齐全（任一为 NULL 即笔顺接口会 404）
+mysql -u 用户名 -p hanzi_writing -e "SELECT character_text, LENGTH(strokes_json) AS s, LENGTH(medians_json) AS m, LENGTH(rad_strokes_json) AS r FROM hanzi_character WHERE character_text='书';"
+
+# 4. 小程序 JS 语法检查
+find frontend/wechat-miniprogram -name '*.js' -print0 | xargs -0 -n1 node --check
+```
+
+浏览器联调时打开 DevTools → Network，确认管理端实际请求的是 `VITE_API_BASE_URL` 拼出的完整 `/api/...` 地址：若 404 多为地址拼接错误，若 CORS 报错多为 `HANZI_CORS_ALLOWED_ORIGINS` 未包含当前来源（跨域预检 `OPTIONS` 被拒）。微信开发者工具在「详情 → 本地设置」可临时勾选「不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书」用于本地联调，正式发布前必须在公众平台「开发管理 → 开发设置 → 服务器域名」配置 `request` 合法域名。
 
 ### 管理端提示无法连接后台
 
@@ -314,3 +446,18 @@ curl -i http://127.0.0.1:8080/api/hanzi/%E4%B9%A6/strokes
 - 请求失败必须显示错误或允许重试，不允许静默返回样例数据，也不允许把失败操作提示为成功。
 - 仓库中不得提交真实数据库密码、管理员密码、访问令牌、私钥或 `.env.local`。
 - 生产环境应使用 HTTPS、受限 CORS 白名单、最小权限数据库账号，并关闭自动种子数据。
+
+### 验证「数据全部来自数据库」
+
+可通过以下步骤确认前端没有内置或兜底业务数据：
+
+1. **停后端**：关闭 Spring Boot 进程后刷新两端。管理端应显示「后台数据加载失败」红色提示且表格为空；小程序应显示「后台数据加载失败」卡片与「重新加载」按钮，不出现任何任务、汉字或记录。
+2. **空库**：仅执行 `schema.sql`、不导入 `seed.sql`，`curl http://127.0.0.1:8080/api/bootstrap` 应返回五个空数组，两端列表均为空状态。
+3. **核对数据源**：直接查 MySQL 并与接口响应对比，记录数与字段值应一致：
+
+   ```bash
+   mysql -u 用户名 -p hanzi_writing -e "SELECT id, character_text, stroke_count FROM hanzi_character;"
+   curl -s http://127.0.0.1:8080/api/bootstrap | python3 -m json.tool
+   ```
+
+4. **写操作校验**：在管理端新增用户后，`SELECT * FROM user_account WHERE username='...'` 应立即出现该行；小程序提交记录后，`practice_record` 表应出现对应行。若界面显示了数据库中不存在的数据，说明前端引入了兜底或写死数据，需要回退修复。
