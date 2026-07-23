@@ -1,5 +1,14 @@
+<!--
+  微信小程序首页模板。
+
+  业务意图：单页承载首页、练字、背诗、记录和我的五个功能页签，所有展示数据
+  均来自 utils/api.js 请求的后端接口；接口失败时只渲染错误卡片和重试入口，
+  不展示任何内置业务列表。书写与笔顺演示使用原生 2D Canvas，不依赖 Web 组件。
+-->
+
 <view class="mini-app">
   <scroll-view class="page-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <!-- 加载与错误状态：与正常业务内容隔离，避免把请求失败渲染成空数据。 -->
     <view wx:if="{{bootstrapLoading}}" class="data-status-card">
       <text class="panel-title">正在连接后台</text>
       <text class="record-desc">正在从数据库读取用户、字库、诗库、任务和练习记录。</text>
@@ -10,6 +19,7 @@
       <button class="secondary-action retry-button" bindtap="loadBootstrapData">重新加载</button>
     </view>
 
+    <!-- 首页：学生概况、练习统计与今日作业。 -->
     <view wx:if="{{activeTab === 'home'}}" class="page-content">
       <view class="student-card">
         <view class="student-copy">
@@ -48,6 +58,7 @@
       </view>
     </view>
 
+    <!-- 练字页：汉字选择、描红 Canvas、笔顺演示与笔画进度。 -->
     <view wx:if="{{activeTab === 'hanzi'}}" class="page-content">
       <view wx:if="{{!currentHanzi && !bootstrapLoading}}" class="empty-card">数据库中暂无汉字资源</view>
       <view class="page-toolbar">
@@ -60,6 +71,7 @@
         </picker>
       </view>
 
+      <!-- 描红底格叠加用户书写层与笔顺演示层，三层共用同一坐标系。 -->
       <view class="copybook-card">
         <text wx:if="{{!strokeDemoVisible}}" class="hanzi-preview">{{currentHanzi.character_text}}</text>
         <canvas
@@ -84,6 +96,7 @@
         </view>
       </view>
 
+      <!-- 笔画进度、实时纠错反馈、错笔/提示统计与演示速度调节。 -->
       <view class="stroke-panel">
         <view class="stroke-row">
           <text class="panel-title">笔画进度</text>
@@ -128,6 +141,7 @@
       </view>
     </view>
 
+    <!-- 背诗页：古诗正文与逐字填空，重点字点击后弹出书写面板。 -->
     <view wx:if="{{activeTab === 'poem'}}" class="page-content">
       <view wx:if="{{!currentPoem && !bootstrapLoading}}" class="empty-card">数据库中暂无古诗资源</view>
       <view class="page-toolbar">
@@ -168,6 +182,7 @@
       </view>
     </view>
 
+    <!-- 记录页：当前学生的练习记录列表，点击展开详情。 -->
     <view wx:if="{{activeTab === 'records'}}" class="page-content">
       <text class="records-title">练习记录</text>
       <view wx:if="{{!studentRecords.length && !bootstrapLoading}}" class="empty-card">数据库中暂无当前学生的练习记录</view>
@@ -181,6 +196,7 @@
       </view>
     </view>
 
+    <!-- 我的：头像、练习统计、笔顺纠错开关与累计指标。 -->
     <view wx:if="{{activeTab === 'profile'}}" class="page-content">
       <view class="profile-header">
         <view class="profile-avatar">{{profileInitial}}</view>
@@ -227,9 +243,22 @@
           <text>{{studentPoemCount}} 首</text>
         </view>
       </view>
+
+      <button class="logout-action" bindtap="logout">退出登录</button>
     </view>
   </scroll-view>
 
+  <!-- 登录引导层：未登录时遮罩整个页面，提示微信登录。 -->
+  <view wx:if="{{loginVisible}}" class="login-mask">
+    <view class="login-card">
+      <view class="login-logo">字</view>
+      <text class="login-title">欢迎来到汉字书写</text>
+      <text class="login-desc">请使用微信登录后开始练字与背诗。</text>
+      <button class="primary-action login-action" loading="{{loginLoading}}" bindtap="handleWxLogin">微信登录</button>
+    </view>
+  </view>
+
+  <!-- 古诗填空手写弹层：在底部弹出方格 Canvas，确认后回填到诗句。 -->
   <view wx:if="{{poemWritingVisible}}" class="modal-mask" catchtap="closePoemWriting">
     <view class="poem-writing-sheet" catchtap="noop">
       <view class="sheet-header">
@@ -259,6 +288,7 @@
     </view>
   </view>
 
+  <!-- 练习记录详情弹层：展示完成度、耗时和逐笔步骤。 -->
   <view wx:if="{{recordDetailVisible}}" class="modal-mask" catchtap="closeRecordDetail">
     <view class="record-detail-sheet" catchtap="noop">
       <view class="sheet-header">
@@ -294,6 +324,7 @@
     </view>
   </view>
 
+  <!-- 底部页签栏：首页、练字、背诗、记录、我的。 -->
   <view class="tab-bar">
     <button wx:for="{{tabs}}" wx:key="key" class="tab-item {{activeTab === item.key ? 'active' : ''}}" bindtap="switchTab" data-tab="{{item.key}}">
       <text class="tab-icon">{{item.icon}}</text>

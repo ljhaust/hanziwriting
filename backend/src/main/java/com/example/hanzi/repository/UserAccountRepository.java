@@ -17,4 +17,12 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, String
      * @return 命中时包含数据库用户，否则为空。
      */
     Optional<UserAccount> findByUsername(String username);
+
+    /**
+     * 按微信 openid 查询用户。
+     *
+     * @param openid 微信小程序登录后由 code2session 换取的 openid。
+     * @return 命中时包含数据库用户，否则为空。
+     */
+    Optional<UserAccount> findByOpenid(String openid);
 }

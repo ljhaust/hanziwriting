@@ -1,7 +1,18 @@
 # 本地开发配置。
-# 业务意图：数据库凭据只能通过环境变量注入，禁止提交真实账号或密码。
+# 业务意图：数据库凭据可保存到被 Git 忽略的 backend/.env.local，避免每次启动都
+# 重复导出环境变量；系统环境变量仍具有更高优先级，可用于临时覆盖本机配置。
+
+server:
+  # 显式引用导入文件中的键，确保 .env.local 与系统环境变量都能覆盖本地端口。
+  port: ${SERVER_PORT:8080}
 
 spring:
+  config:
+    # 同时兼容在 backend 目录内启动，以及从仓库根目录通过 -f backend/pom.xml 启动。
+    # 扩展名提示让 Spring 将无扩展名的 .env.local 按 Java properties 格式解析。
+    import:
+      - optional:file:./.env.local[.properties]
+      - optional:file:./backend/.env.local[.properties]
   datasource:
     url: ${HANZI_DB_URL:jdbc:mysql://localhost:3306/hanzi_writing?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
     username: ${HANZI_DB_USERNAME}

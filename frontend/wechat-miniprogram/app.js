@@ -1,10 +1,30 @@
 /**
  * 微信小程序入口。
  *
- * <p>API 地址优先读取微信开发者工具或发行环境注入的 ext.json 配置，也可在
- * globalData 中为当前环境配置。两处均未配置时由请求层给出明确错误，避免把开发、测试或生产域名固化
- * 到业务代码。ext.json 只应保存公开服务地址，不得保存口令或访问令牌。</p>
+ * <p>API 地址优先读取发行环境注入的 ext.json，其次读取被 Git 忽略的
+ * local-config.js，最后才使用 globalData 中的默认值。这样微信开发者工具模拟器
+ * 不支持 ext.json 注入时仍能稳定进行本地联调；所有配置只允许保存公开服务地址，
+ * 不得保存口令或访问令牌。</p>
  */
+
+/**
+ * 读取仅存在于本机的调试覆盖配置。
+ *
+ * 业务意图：local-config.js 被 .gitignore 排除，开发者可在本机保存 API 地址而不
+ * 修改业务入口文件；发布包不存在该文件时，捕获模块缺失并回退为空配置。
+ *
+ * @returns {{apiBaseUrl?: string}} 本地调试配置对象；文件不存在或内容异常时返回空对象。
+ */
+function loadLocalDebugConfig() {
+  try {
+    return require("./local-config");
+  } catch (error) {
+    return {};
+  }
+}
+
+const localDebugConfig = loadLocalDebugConfig();
+
 App({
   /**
    * 小程序启动生命周期。
@@ -13,7 +33,10 @@ App({
    */
   onLaunch() {
     const extensionConfig = wx.getExtConfigSync ? wx.getExtConfigSync() : {};
-    this.globalData.apiBaseUrl = String(extensionConfig.apiBaseUrl || this.globalData.apiBaseUrl || "").trim();
+    const configuredApiBaseUrl = extensionConfig.apiBaseUrl
+      || localDebugConfig.apiBaseUrl
+      || this.globalData.apiBaseUrl;
+    this.globalData.apiBaseUrl = String(configuredApiBaseUrl || "").trim();
   },
 
   /**

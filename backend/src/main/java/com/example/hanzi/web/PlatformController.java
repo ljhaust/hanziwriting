@@ -10,7 +10,9 @@ import com.example.hanzi.dto.HanziRecommendedRequest;
 import com.example.hanzi.dto.HanziStrokeResponse;
 import com.example.hanzi.dto.LoginRequest;
 import com.example.hanzi.dto.UserStatusRequest;
+import com.example.hanzi.dto.WxLoginRequest;
 import com.example.hanzi.service.PlatformService;
+import com.example.hanzi.service.WechatLoginService;
 import java.util.List;
 import javax.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -33,14 +35,17 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api")
 public class PlatformController {
     private final PlatformService platformService;
+    private final WechatLoginService wechatLoginService;
 
     /**
      * 创建平台 REST 控制器。
      *
      * @param platformService 数据库业务服务。
+     * @param wechatLoginService 微信 code2session 登录服务。
      */
-    public PlatformController(PlatformService platformService) {
+    public PlatformController(PlatformService platformService, WechatLoginService wechatLoginService) {
         this.platformService = platformService;
+        this.wechatLoginService = wechatLoginService;
     }
 
     /**
@@ -72,6 +77,18 @@ public class PlatformController {
     @PostMapping("/auth/login")
     public UserAccount login(@Valid @RequestBody LoginRequest request) {
         return platformService.authenticate(request.getUsername(), request.getPassword());
+    }
+
+    /**
+     * 使用微信登录凭证完成小程序登录。
+     *
+     * @param request 包含 wx.login 的 code 与可选资料的请求体。
+     * @return 命中或新建后的学生用户，响应不包含密码摘要。
+     */
+    @PostMapping("/auth/wx-login")
+    public UserAccount wxLogin(@Valid @RequestBody WxLoginRequest request) {
+        String openid = wechatLoginService.exchangeOpenid(request.getCode());
+        return platformService.loginByOpenid(openid, request.getNickname(), request.getAvatarUrl());
     }
 
     /**

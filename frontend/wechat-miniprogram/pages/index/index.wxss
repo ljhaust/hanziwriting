@@ -1,3 +1,11 @@
+/*
+ * 小程序首页样式。
+ *
+ * 按页面区块顺序组织：基础布局、首页卡片、练字画布、笔画面板、古诗区、
+ * 弹层、我的和底部页签。主色为 #111827 深灰，尺寸统一使用 rpx 适配多机型。
+ */
+
+/* 基础布局：页面外壳、可滚动区域与各页签公共内边距。 */
 .mini-app {
   display: flex;
   flex-direction: column;
@@ -21,6 +29,7 @@
   padding: 28rpx 28rpx 36rpx;
 }
 
+/* 首页：学生概况深色卡、任务完成度环形指示与练习统计。 */
 .student-card {
   display: flex;
   align-items: center;
@@ -74,6 +83,7 @@
   gap: 18rpx;
 }
 
+/* 卡片通用背景：内容区统一白底加浅灰描边和圆角。 */
 .stat-card,
 .task-card,
 .record-card,
@@ -144,6 +154,7 @@
   margin: 6rpx 0 0;
 }
 
+/* 任务与记录卡片：左侧信息列、右侧操作按钮或评分标签横向排列。 */
 .task-card,
 .record-card {
   display: flex;
@@ -204,6 +215,7 @@
   border-radius: 999rpx;
 }
 
+/* 页面工具栏：左侧标题与右侧汉字/古诗选择器。 */
 .page-toolbar {
   display: flex;
   align-items: center;
@@ -241,6 +253,7 @@
   border-radius: 999rpx;
 }
 
+/* 描红格：田字格底纹叠加大字提示与用户书写/笔顺演示 Canvas。 */
 .copybook-card {
   position: relative;
   display: flex;
@@ -317,6 +330,7 @@
   font-weight: 800;
 }
 
+/* 笔画进度面板：进度条、实时纠错反馈、错笔/提示统计与演示速度滑块。 */
 .stroke-panel {
   display: flex;
   flex-direction: column;
@@ -416,6 +430,7 @@
   margin-top: -6rpx;
 }
 
+/* 操作按钮：清空、笔顺演示与提交评测。 */
 .action-row {
   display: flex;
   gap: 16rpx;
@@ -443,6 +458,7 @@
   background: #111827;
 }
 
+/* 古诗区：正文卡片与译文卡片共用内边距。 */
 .poem-card,
 .note-card {
   padding: 28rpx;
@@ -487,6 +503,7 @@
   border-color: #86efac;
 }
 
+/* 弹层：底部抽屉式遮罩，承载古诗手写面板与记录详情。 */
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -590,6 +607,7 @@
   margin-top: 22rpx;
 }
 
+/* 记录详情：完成度、错笔与耗时三列指标，下方接逐笔步骤列表。 */
 .detail-meta-grid {
   display: flex;
   gap: 14rpx;
@@ -664,6 +682,7 @@
   line-height: 1.35;
 }
 
+/* 我的页：头像信息、笔顺纠错开关与累计指标列表共用卡片底。 */
 .profile-header,
 .setting-card,
 .profile-list {
@@ -757,6 +776,7 @@
   gap: 12rpx;
 }
 
+/* 底部页签栏：固定在视口底部并适配全面屏安全区。 */
 .tab-bar {
   display: flex;
   height: calc(118rpx + env(safe-area-inset-bottom));
@@ -788,4 +808,75 @@
 .tab-label {
   font-size: 11px;
   line-height: 1;
+}
+
+/* 登录引导层：未登录时遮罩整页（含底部页签），承载微信登录入口。 */
+.login-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24rpx;
+  padding: 48rpx;
+  background: #f8fafc;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20rpx;
+  width: 100%;
+  max-width: 560rpx;
+  padding: 56rpx 40rpx;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 24rpx;
+}
+
+.login-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 120rpx;
+  height: 120rpx;
+  color: #ffffff;
+  font-size: 36px;
+  font-weight: 900;
+  background: #111827;
+  border-radius: 28rpx;
+}
+
+.login-title {
+  color: #111827;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.login-desc {
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.login-action {
+  width: 100%;
+  margin-top: 16rpx;
+}
+
+/* 退出登录按钮：浅红警示风格，区别于主要操作。 */
+.logout-action {
+  height: 78rpx;
+  color: #991b1b;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 78rpx;
+  text-align: center;
+  background: #ffffff;
+  border: 1px solid #fecaca;
+  border-radius: 14rpx;
 }

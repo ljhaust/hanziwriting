@@ -20,3 +20,7 @@ spring:
 app:
   cors:
     allowed-origins: ${HANZI_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+
+wx:
+  appid: ${HANZI_WX_APPID:wx33e3c288d2f0db88}
+  secret: ${HANZI_WX_SECRET:}

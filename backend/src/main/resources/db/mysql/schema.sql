@@ -17,9 +17,11 @@ CREATE TABLE IF NOT EXISTS user_account (
   user_type VARCHAR(32) DEFAULT NULL COMMENT '用户类型：admin、teacher、parent、student',
   status VARCHAR(32) DEFAULT NULL COMMENT '账号状态：enabled、disabled',
   join_date VARCHAR(20) DEFAULT NULL COMMENT '注册日期，格式 yyyy-MM-dd',
+  openid VARCHAR(64) DEFAULT NULL COMMENT '微信小程序 openid，用于微信登录识别用户',
   password_hash VARCHAR(100) DEFAULT NULL COMMENT 'BCrypt 密码摘要，禁止存储明文',
   PRIMARY KEY (id),
   UNIQUE KEY uk_user_account_username (username),
+  UNIQUE KEY uk_user_account_openid (openid),
   KEY idx_user_account_phone (phone),
   KEY idx_user_account_type (user_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='平台用户账号';

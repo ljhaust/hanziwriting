@@ -39,6 +39,9 @@ public class UserAccount {
     /** 注册日期，格式为 yyyy-MM-dd。 */
     private String joinDate;
 
+    /** 微信小程序 openid，用于微信登录识别唯一用户；非微信账号为空。 */
+    private String openid;
+
     /** BCrypt 密码摘要；仅用于后端校验，任何接口都不得序列化返回。 */
     @JsonIgnore
     private String passwordHash;
@@ -97,6 +100,14 @@ public class UserAccount {
 
     public void setJoinDate(String joinDate) {
         this.joinDate = joinDate;
+    }
+
+    public String getOpenid() {
+        return openid;
+    }
+
+    public void setOpenid(String openid) {
+        this.openid = openid;
     }
 
     /**
