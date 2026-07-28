@@ -115,10 +115,20 @@ function requestJson(path, options = {}) {
           return;
         }
 
-        reject(new Error(`接口请求失败：${response.statusCode}`));
+        // HTTP 响应说明网络链路已经建立，应保留状态码和后端安全错误信息，
+        // 避免页面把缺少业务数据、参数错误等情况误报成网络连接失败。
+        const responseMessage = response.data
+          && typeof response.data === "object"
+          && typeof response.data.message === "string"
+          ? response.data.message.trim()
+          : "";
+        const errorSuffix = responseMessage ? `：${responseMessage}` : "";
+        reject(new Error(`接口请求失败（HTTP ${response.statusCode}）${errorSuffix}`));
       },
       fail(error) {
-        reject(new Error(error.errMsg || "接口请求失败"));
+        // 只有 wx.request 未取得 HTTP 响应时才属于传输层网络错误。
+        const networkMessage = error && error.errMsg ? error.errMsg : "无法连接后端服务";
+        reject(new Error(`网络请求失败：${networkMessage}`));
       },
     });
   });

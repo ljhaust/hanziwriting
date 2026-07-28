@@ -43,6 +43,34 @@ const STROKE_NORMALIZED_MIN_LENGTH = 0.12;
 const STROKE_LENGTH_RATIO_MIN = 0.5;
 const STROKE_LENGTH_RATIO_MAX = 2.0;
 
+/**
+ * 轨迹比较的统一采样点数。
+ *
+ * 真机 touchmove 频率会随设备性能和手指移动速度变化；比较前按路径长度
+ * 重新采样到固定点数，可以避免某一小段因为事件更密集而过度影响质心和
+ * 外接框，确保相同笔画在不同手机上的判定结果保持一致。
+ */
+const STROKE_COMPARISON_SAMPLE_COUNT = 24;
+
+/**
+ * 真机触摸坐标的基础噪声补偿。
+ *
+ * 约 3 CSS 像素的落笔误差对长横影响很小，却可能占“点”等短笔画尺寸的
+ * 较大比例；因此按标准笔画屏幕尺寸换算为归一化容差，并通过上限避免把
+ * 短笔画校验无限放宽。路径容差只吸收其中一部分，继续约束整体笔形。
+ */
+const STROKE_TOUCH_NOISE_ALLOWANCE_PX = 3;
+const STROKE_TOUCH_NOISE_MAX_NORMALIZED = 0.1;
+const STROKE_TOUCH_PATH_ALLOWANCE_FACTOR = 0.3;
+
+/**
+ * 连续触摸点的最小有效移动距离，单位为 CSS 像素。
+ *
+ * 低于该距离的事件视为设备抖动，不绘制零长度曲线；这样轻点可以稳定走
+ * 圆点绘制分支，连续书写又不会因大量重复坐标增加轨迹噪声。
+ */
+const TOUCH_POINT_MIN_DISTANCE_PX = 1.5;
+
 /** 单次绘制动画的兜底延迟，兼容不支持 canvas.requestAnimationFrame 的基础库。 */
 const FALLBACK_FRAME_DELAY_MS = 16;
 
@@ -486,11 +514,13 @@ Page({
       .catch((error) => {
         console.warn("笔顺纠错数据加载失败。", error);
         if (loadToken === this.writingGuideLoadToken) {
+          // 向用户呈现真实的接口或网络错误，便于区分轨迹缺失与连接失败。
+          const errorMessage = error && error.message ? error.message : "未知错误";
           this.setData({
             writingGuideStatus: "error",
             writingFeedbackVisible: true,
             writingFeedbackType: "error",
-            writingFeedbackText: "笔顺纠错暂不可用，请检查网络后重试。",
+            writingFeedbackText: `笔顺纠错暂不可用：${errorMessage}`,
           });
         }
         return null;
@@ -560,13 +590,21 @@ Page({
   /**
    * 结束一笔书写并累计笔画进度。
    *
+   * @param {WechatMiniprogram.TouchEvent} event 触摸结束事件，changedTouches 包含真实收笔坐标。
    * @returns {void} 无返回值。
    */
-  stopDrawing() {
+  stopDrawing(event) {
     if (!this.isDrawing) {
       return;
     }
 
+    // 真机快速书写时，最后一次 touchmove 可能早于抬笔位置。必须从
+    // changedTouches 补录终点，否则短横、点、撇会被截短并误报为书写错误。
+    const endPoint = getTouchPoint(event, this.canvasRect);
+    if (endPoint) {
+      this.pendingPoint = endPoint;
+      appendDistinctPoint(this.currentStrokePoints, endPoint);
+    }
     this.cancelPendingFrame();
     this.paintPendingPoint();
     if (!this.hasDrawnSegment && this.lastPoint) {
@@ -696,8 +734,10 @@ Page({
         strokeDemoVisible: false,
         strokeDemoText: "点击笔顺演示查看示范。",
       });
+      // Toast 空间有限，提示错误类别；完整错误仍保留在调试控制台中。
+      const errorMessage = error && error.message ? error.message : "未知错误";
       wx.showToast({
-        title: "暂时无法加载笔顺演示",
+        title: `笔顺加载失败：${errorMessage}`,
         icon: "none",
       });
     }
@@ -989,6 +1029,9 @@ Page({
 
     const last = this.lastPoint;
     const next = this.pendingPoint;
+    if (distanceBetweenPoints(last, next) < TOUCH_POINT_MIN_DISTANCE_PX) {
+      return;
+    }
     const midPoint = {
       x: (last.x + next.x) / 2,
       y: (last.y + next.y) / 2,
@@ -1193,13 +1236,35 @@ Page({
   /**
    * 结束古诗填空的一笔书写。
    *
+   * @param {WechatMiniprogram.TouchEvent} event 触摸结束事件，changedTouches 包含真实收笔坐标。
    * @returns {void} 无返回值。
    */
-  stopPoemWriting() {
+  stopPoemWriting(event) {
     if (!this.poemIsDrawing) {
       return;
     }
-    if (!this.data.poemWritingHasInk && this.poemLastPoint && this.poemCanvasContext) {
+
+    // 与主练字 Canvas 保持一致：真机快速抬笔时使用 touchend 的终点补齐
+    // 最后一段，避免短笔画只留下起点或半截轨迹。
+    const endPoint = getTouchPoint(event, this.poemCanvasRect);
+    const hasFinalSegment = endPoint
+      && this.poemLastPoint
+      && distanceBetweenPoints(this.poemLastPoint, endPoint) >= TOUCH_POINT_MIN_DISTANCE_PX;
+    if (hasFinalSegment && this.poemCanvasContext) {
+      this.poemCanvasContext.quadraticCurveTo(
+        this.poemLastPoint.x,
+        this.poemLastPoint.y,
+        endPoint.x,
+        endPoint.y,
+      );
+      this.poemCanvasContext.stroke();
+      this.poemLastPoint = endPoint;
+      this.setData({
+        poemWritingHasInk: true,
+        poemWritingFeedback: "已识别到书写，确认后填入诗句。",
+      });
+    }
+    if (!this.data.poemWritingHasInk && !hasFinalSegment && this.poemLastPoint && this.poemCanvasContext) {
       this.poemCanvasContext.beginPath();
       this.poemCanvasContext.arc(this.poemLastPoint.x, this.poemLastPoint.y, POEM_DRAW_LINE_WIDTH / 2, 0, Math.PI * 2);
       this.poemCanvasContext.fill();
@@ -1690,7 +1755,7 @@ function appendDistinctPoint(points, point) {
   }
 
   const lastPoint = points[points.length - 1];
-  if (lastPoint && distanceBetweenPoints(lastPoint, point) < 1.5) {
+  if (lastPoint && distanceBetweenPoints(lastPoint, point) < TOUCH_POINT_MIN_DISTANCE_PX) {
     return false;
   }
 
@@ -1732,6 +1797,16 @@ function evaluateStrokeAttempt(attemptedPoints, expectedMedian, canvasWidth, can
   const lengthRatio = expectedLength > 0 ? userLength / expectedLength : 0;
   const forwardDistance = calculateAverageTrackDistance(normalizedUser, normalizedExpected);
   const reverseDistance = calculateAverageTrackDistance(normalizedUser, normalizedExpected.slice().reverse());
+  const expectedBounds = getPolylineBounds(expectedPoints);
+  const expectedSpan = Math.max(expectedBounds.width, expectedBounds.height, 1);
+  const touchNoiseAllowance = Math.min(
+    STROKE_TOUCH_NOISE_MAX_NORMALIZED,
+    STROKE_TOUCH_NOISE_ALLOWANCE_PX / expectedSpan,
+  );
+  const startTolerance = STROKE_NORMALIZED_START_TOLERANCE + touchNoiseAllowance;
+  const endTolerance = STROKE_NORMALIZED_END_TOLERANCE + touchNoiseAllowance;
+  const pathTolerance = STROKE_NORMALIZED_PATH_TOLERANCE
+    + touchNoiseAllowance * STROKE_TOUCH_PATH_ALLOWANCE_FACTOR;
   const startDistance = distanceBetweenPoints(normalizedUser[0], normalizedExpected[0]);
   const endDistance = distanceBetweenPoints(
     normalizedUser[normalizedUser.length - 1],
@@ -1744,16 +1819,16 @@ function evaluateStrokeAttempt(attemptedPoints, expectedMedian, canvasWidth, can
   if (lengthRatio < STROKE_LENGTH_RATIO_MIN || lengthRatio > STROKE_LENGTH_RATIO_MAX) {
     return { valid: false, message: "这一笔长度差异太大，请重新书写。" };
   }
-  if (startDistance > STROKE_NORMALIZED_START_TOLERANCE) {
+  if (startDistance > startTolerance) {
     return { valid: false, message: "起笔位置不对，请看准这一笔的开头再写。" };
   }
   if (reverseDistance + STROKE_NORMALIZED_DIRECTION_MARGIN < forwardDistance) {
     return { valid: false, message: "这一笔方向反了，请按笔顺从起笔处写到收笔处。" };
   }
-  if (endDistance > STROKE_NORMALIZED_END_TOLERANCE) {
+  if (endDistance > endTolerance) {
     return { valid: false, message: "收笔位置偏差较大，请沿着这一笔写完整。" };
   }
-  if (forwardDistance > STROKE_NORMALIZED_PATH_TOLERANCE) {
+  if (forwardDistance > pathTolerance) {
     return { valid: false, message: "笔画轨迹偏离较多，请贴近示范笔画重新写。" };
   }
 
@@ -1771,24 +1846,30 @@ function evaluateStrokeAttempt(attemptedPoints, expectedMedian, canvasWidth, can
  * @returns {Array<{x:number,y:number}>} 归一化后的点列表；输入为空时返回空数组。
  */
 function alignStrokeForCompare(points) {
-  const safePoints = toArraySafe(points);
+  const safePoints = normalizeCanvasPoints(points);
   if (!safePoints.length) {
     return [];
   }
 
+  // 先按路径进度统一采样，再计算质心与外接框。直接对原始 touchmove 点
+  // 求质心会让高频设备或手指停顿区域获得过高权重，造成正确笔画位置漂移。
+  const sampledPoints = samplePolyline(safePoints, STROKE_COMPARISON_SAMPLE_COUNT);
   let sumX = 0;
   let sumY = 0;
-  safePoints.forEach((point) => {
-    sumX += Number(point && point.x) || 0;
-    sumY += Number(point && point.y) || 0;
+  sampledPoints.forEach((point) => {
+    sumX += point.x;
+    sumY += point.y;
   });
-  const centroid = { x: sumX / safePoints.length, y: sumY / safePoints.length };
-  const bounds = getPolylineBounds(safePoints);
+  const centroid = {
+    x: sumX / sampledPoints.length,
+    y: sumY / sampledPoints.length,
+  };
+  const bounds = getPolylineBounds(sampledPoints);
   const size = Math.max(bounds.width, bounds.height, 1);
 
-  return safePoints.map((point) => ({
-    x: (Number(point.x) - centroid.x) / size,
-    y: (Number(point.y) - centroid.y) / size,
+  return sampledPoints.map((point) => ({
+    x: (point.x - centroid.x) / size,
+    y: (point.y - centroid.y) / size,
   }));
 }
 
@@ -1979,18 +2060,35 @@ function calculateAverageTrackDistance(userPoints, expectedPoints) {
 }
 
 /**
- * 从折线中按长度均匀采样。
+ * 从折线中按长度均匀重采样。
+ *
+ * 无论原始点数多于还是少于目标点数，都返回沿路径进度均匀分布的点；
+ * 这样既能压缩高频 touchmove 数据，也能为真机稀疏轨迹补出稳定的比较点。
  *
  * @param {Array<{x:number,y:number}>} points 原始折线点。
  * @param {number} sampleCount 目标采样数量。
  * @returns {Array<{x:number,y:number}>} 采样后的点列表。
  */
 function samplePolyline(points, sampleCount) {
-  if (points.length <= sampleCount) {
-    return points.slice();
+  const safePoints = normalizeCanvasPoints(points);
+  const safeSampleCount = Math.max(Math.floor(Number(sampleCount) || 0), 0);
+  if (!safePoints.length || !safeSampleCount) {
+    return [];
+  }
+  if (safePoints.length === 1 || safeSampleCount === 1) {
+    return [safePoints[0]];
+  }
+  if (safeSampleCount === 2) {
+    return [safePoints[0], safePoints[safePoints.length - 1]];
   }
 
-  return Array.from({ length: sampleCount }).map((_, index) => getPointAtPolylineProgress(points, index / (sampleCount - 1))).filter(Boolean);
+  const sampledPoints = Array.from({ length: safeSampleCount }).map((_, index) => (
+    getPointAtPolylineProgress(safePoints, index / (safeSampleCount - 1))
+  )).filter(Boolean);
+  if (!sampledPoints.length) {
+    return safePoints.slice();
+  }
+  return sampledPoints;
 }
 
 /**
