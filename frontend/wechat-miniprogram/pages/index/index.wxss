@@ -9,7 +9,8 @@
 .mini-app {
   display: flex;
   flex-direction: column;
-  width: 100vw;
+  width: 100%;
+  height: 100vh;
   min-height: 100vh;
   overflow: hidden;
   background: #f8fafc;
@@ -18,14 +19,16 @@
 
 .page-scroll {
   flex: 1;
-  height: calc(100vh - 118rpx - env(safe-area-inset-bottom));
+  width: 100%;
+  min-height: 0;
+  height: 0;
 }
 
 .page-content {
   display: flex;
   flex-direction: column;
-  gap: 28rpx;
   width: 100%;
+  min-width: 0;
   padding: 28rpx 28rpx 36rpx;
 }
 
@@ -45,7 +48,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 16rpx;
+  min-width: 0;
 }
 
 .muted {
@@ -80,7 +83,6 @@
 
 .stat-grid {
   display: flex;
-  gap: 18rpx;
 }
 
 /* 卡片通用背景：内容区统一白底加浅灰描边和圆角。 */
@@ -99,7 +101,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 10rpx;
+  min-width: 0;
   padding: 26rpx 22rpx;
 }
 
@@ -141,7 +143,6 @@
 .data-status-card {
   display: flex;
   flex-direction: column;
-  gap: 14rpx;
 }
 
 .data-status-card.error {
@@ -160,7 +161,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24rpx;
+  min-width: 0;
   padding: 26rpx;
 }
 
@@ -170,7 +171,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 12rpx;
+  min-width: 0;
 }
 
 .task-title,
@@ -180,6 +181,7 @@
   font-size: 15px;
   font-weight: 800;
   line-height: 1.35;
+  word-break: break-all;
 }
 
 .tag,
@@ -204,8 +206,12 @@
 
 .primary-pill {
   flex: 0 0 auto;
-  min-width: 104rpx;
+  width: 128rpx;
+  min-width: 128rpx;
+  max-width: 128rpx;
   height: 58rpx;
+  padding: 0;
+  margin: 0;
   color: #ffffff;
   font-size: 12px;
   font-weight: 800;
@@ -220,7 +226,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24rpx;
+  min-width: 0;
 }
 
 .toolbar-kicker {
@@ -274,7 +280,10 @@
 .copybook-card::before,
 .copybook-card::after {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   pointer-events: none;
   content: "";
 }
@@ -305,7 +314,10 @@
 
 .stroke-demo-canvas {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 3;
   display: block;
   width: 100%;
@@ -334,7 +346,6 @@
 .stroke-panel {
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
   padding: 26rpx;
 }
 
@@ -361,7 +372,6 @@
 .writing-feedback {
   display: flex;
   flex-direction: column;
-  gap: 6rpx;
   padding: 18rpx 20rpx;
   border-radius: 14rpx;
 }
@@ -407,14 +417,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20rpx;
 }
 
 .demo-speed-copy {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 6rpx;
   min-width: 0;
 }
 
@@ -433,7 +441,6 @@
 /* 操作按钮：清空、笔顺演示与提交评测。 */
 .action-row {
   display: flex;
-  gap: 16rpx;
 }
 
 .secondary-action,
@@ -467,14 +474,12 @@
 .poem-lines {
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
   margin-top: 28rpx;
 }
 
 .poem-line {
   display: flex;
   justify-content: center;
-  gap: 10rpx;
 }
 
 .poem-char {
@@ -506,12 +511,19 @@
 /* 弹层：底部抽屉式遮罩，承载古诗手写面板与记录详情。 */
 .modal-mask {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 20;
   display: flex;
+  width: 100%;
+  height: 100%;
   align-items: flex-end;
   justify-content: center;
-  padding: 24rpx 24rpx calc(24rpx + env(safe-area-inset-bottom));
+  padding: 24rpx;
+  padding-bottom: calc(24rpx + constant(safe-area-inset-bottom));
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
   background: rgba(15, 23, 42, 0.42);
 }
 
@@ -528,14 +540,13 @@
 .record-detail-sheet {
   display: flex;
   flex-direction: column;
-  gap: 22rpx;
 }
 
 .sheet-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18rpx;
+  min-width: 0;
 }
 
 .sheet-title {
@@ -578,7 +589,10 @@
 
 .poem-writing-board::before {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   pointer-events: none;
   content: "";
   background:
@@ -603,21 +617,18 @@
 
 .sheet-actions {
   display: flex;
-  gap: 16rpx;
   margin-top: 22rpx;
 }
 
 /* 记录详情：完成度、错笔与耗时三列指标，下方接逐笔步骤列表。 */
 .detail-meta-grid {
   display: flex;
-  gap: 14rpx;
 }
 
 .detail-meta-item {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 8rpx;
   min-width: 0;
   padding: 18rpx;
   background: #f9fafb;
@@ -635,7 +646,6 @@
 .step-list {
   display: flex;
   flex-direction: column;
-  gap: 14rpx;
   max-height: 46vh;
   overflow: auto;
 }
@@ -643,7 +653,6 @@
 .step-row {
   display: flex;
   align-items: flex-start;
-  gap: 16rpx;
   padding: 16rpx 0;
   border-bottom: 1px solid #f3f4f6;
 }
@@ -671,7 +680,6 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 6rpx;
   min-width: 0;
 }
 
@@ -694,7 +702,7 @@
 
 .profile-header {
   align-items: center;
-  gap: 22rpx;
+  min-width: 0;
   padding: 28rpx;
 }
 
@@ -717,7 +725,6 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 8rpx;
   min-width: 0;
 }
 
@@ -730,14 +737,13 @@
 
 .profile-grid {
   display: flex;
-  gap: 18rpx;
 }
 
 .profile-stat {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 10rpx;
+  min-width: 0;
   padding: 24rpx 18rpx;
   background: #ffffff;
   border: 1px solid #e5e7eb;
@@ -747,7 +753,7 @@
 .setting-card {
   align-items: center;
   justify-content: space-between;
-  gap: 22rpx;
+  min-width: 0;
   padding: 26rpx;
 }
 
@@ -773,13 +779,17 @@
 .note-card {
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
 }
 
 /* 底部页签栏：固定在视口底部并适配全面屏安全区。 */
 .tab-bar {
   display: flex;
+  flex: 0 0 auto;
+  height: 118rpx;
+  height: calc(118rpx + constant(safe-area-inset-bottom));
   height: calc(118rpx + env(safe-area-inset-bottom));
+  padding-bottom: 0;
+  padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
   background: #ffffff;
   border-top: 1px solid #e5e7eb;
@@ -791,7 +801,10 @@
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  gap: 6rpx;
+  width: 20%;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
   color: #6b7280;
 }
 
@@ -813,13 +826,17 @@
 /* 登录引导层：未登录时遮罩整页（含底部页签），承载微信登录入口。 */
 .login-mask {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 100;
   display: flex;
+  width: 100%;
+  height: 100%;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 24rpx;
   padding: 48rpx;
   background: #f8fafc;
 }
@@ -828,8 +845,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20rpx;
   width: 100%;
+  min-width: 0;
   max-width: 560rpx;
   padding: 56rpx 40rpx;
   background: #ffffff;
@@ -879,4 +896,137 @@
   background: #ffffff;
   border: 1px solid #fecaca;
   border-radius: 14rpx;
+}
+
+/*
+ * iOS 真机兼容间距：
+ * 较旧的微信 iOS WebView 不支持 Flexbox gap，开发者工具却会正常渲染，
+ * 因此必须用相邻元素外边距表达同一视觉节奏。规则按组件边界限定，避免
+ * 外边距穿透到条件渲染之外，也保证首页、五个页签和两个弹层使用一致间距。
+ */
+.page-content > view + view,
+.page-content > view + text,
+.page-content > view + button,
+.page-content > text + view,
+.page-content > text + text,
+.page-content > text + button {
+  margin-top: 28rpx;
+}
+
+.student-copy > text + text {
+  margin-top: 16rpx;
+}
+
+.stat-card + .stat-card,
+.profile-stat + .profile-stat {
+  margin-left: 18rpx;
+}
+
+.stat-card > text + text,
+.profile-stat > text + text {
+  margin-top: 10rpx;
+}
+
+.data-status-card > text + text,
+.data-status-card > text + button {
+  margin-top: 14rpx;
+}
+
+.task-card > button,
+.record-card > .score-tag {
+  margin-left: 24rpx;
+}
+
+.task-info > text + text,
+.record-info > text + text,
+.poem-header > text + text {
+  margin-top: 12rpx;
+}
+
+.page-toolbar > picker {
+  margin-left: 24rpx;
+}
+
+.stroke-panel > view + view,
+.stroke-panel > view + text,
+.stroke-panel > view + slider,
+.stroke-panel > text + view,
+.stroke-panel > text + text {
+  margin-top: 18rpx;
+}
+
+.writing-feedback > text + text,
+.demo-speed-copy > text + text,
+.step-copy > text + text,
+.tab-item > text + text {
+  margin-top: 6rpx;
+}
+
+.demo-speed-row > .demo-speed-value {
+  margin-left: 20rpx;
+}
+
+.action-row > button,
+.sheet-actions > button {
+  width: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.action-row > button + button,
+.sheet-actions > button + button {
+  margin-left: 16rpx;
+}
+
+.poem-lines > .poem-line + .poem-line {
+  margin-top: 18rpx;
+}
+
+.poem-line > .poem-char + .poem-char {
+  margin-left: 10rpx;
+}
+
+.record-detail-sheet > view + view {
+  margin-top: 22rpx;
+}
+
+.sheet-header > button {
+  margin-left: 18rpx;
+}
+
+.detail-meta-item + .detail-meta-item {
+  margin-left: 14rpx;
+}
+
+.detail-meta-item > text + text {
+  margin-top: 8rpx;
+}
+
+.step-list > .step-row + .step-row {
+  margin-top: 14rpx;
+}
+
+.step-row > .step-copy {
+  margin-left: 16rpx;
+}
+
+.profile-header > .profile-copy,
+.setting-card > switch {
+  margin-left: 22rpx;
+}
+
+.profile-copy > text + text,
+.setting-copy > text + text {
+  margin-top: 8rpx;
+}
+
+.note-card > text + text {
+  margin-top: 12rpx;
+}
+
+.login-card > view + text,
+.login-card > text + text,
+.login-card > text + button {
+  margin-top: 20rpx;
 }

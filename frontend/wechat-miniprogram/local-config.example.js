@@ -6,5 +6,5 @@
  */
 module.exports = {
   /** 本机 Spring Boot 服务根地址；请求层会自动追加 /api。 */
-  apiBaseUrl: "http://127.0.0.1:8080",
+  apiBaseUrl: "http://192.168.108.72:8080",
 };

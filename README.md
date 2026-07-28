@@ -156,7 +156,7 @@ MAVEN_OPTS='-Dfile.encoding=UTF-8' mvn spring-boot:run
 后端启动后可先验证聚合接口：
 
 ```bash
-curl -i http://127.0.0.1:8080/api/bootstrap
+curl -i http://192.168.108.72:8080/api/bootstrap
 ```
 
 正常情况下应返回 HTTP 200 和 JSON；空库应返回空集合，不应由前端补演示数据。
@@ -214,7 +214,7 @@ cp local-config.example.js local-config.js
 ```json
 {
   "ext": {
-    "apiBaseUrl": "http://127.0.0.1:8080"
+    "apiBaseUrl": "http://192.168.108.72:8080"
   }
 }
 ```
@@ -261,9 +261,9 @@ cp local-config.example.js local-config.js
 接口使用示例：
 
 ```bash
-curl -i http://127.0.0.1:8080/api/hanzi
-curl -i http://127.0.0.1:8080/api/hanzi/%E4%B9%A6/strokes
-curl -i -X POST http://127.0.0.1:8080/api/records \
+curl -i http://192.168.108.72:8080/api/hanzi
+curl -i http://192.168.108.72:8080/api/hanzi/%E4%B9%A6/strokes
+curl -i -X POST http://192.168.108.72:8080/api/records \
   -H 'Content-Type: application/json' \
   -d '{"user_id":"数据库中的学生 ID","item_type":"hanzi","item_id":"数据库中的汉字 ID","item_name":"书","complete_status":"completed","stroke_total":4,"stroke_completed":4,"mistake_count":0,"hint_count":0,"duration_seconds":60,"practice_time":"2026-07-21 10:00"}'
 ```
@@ -373,7 +373,7 @@ find frontend/wechat-miniprogram -name '*.js' -print0 | xargs -0 -n1 node --chec
 ```bash
 # 1. 后端进程与端口
 lsof -i:8080 | grep LISTEN                       # 后端是否在监听 8080
-curl -i http://127.0.0.1:8080/api/bootstrap      # 聚合接口是否返回 200
+curl -i http://192.168.108.72:8080/api/bootstrap      # 聚合接口是否返回 200
 
 # 2. 数据库连通与数据
 mysql -u 用户名 -p -e "SELECT 1;"                 # MySQL 是否可连
@@ -394,7 +394,7 @@ find frontend/wechat-miniprogram -name '*.js' -print0 | xargs -0 -n1 node --chec
 依次检查：
 
 ```bash
-curl -i http://127.0.0.1:8080/api/bootstrap
+curl -i http://192.168.108.72:8080/api/bootstrap
 ```
 
 - 后端是否启动、端口是否与 `VITE_API_BASE_URL` 一致；
@@ -427,7 +427,7 @@ curl -i http://127.0.0.1:8080/api/bootstrap
 先直接请求：
 
 ```bash
-curl -i http://127.0.0.1:8080/api/hanzi/%E4%B9%A6/strokes
+curl -i http://192.168.108.72:8080/api/hanzi/%E4%B9%A6/strokes
 ```
 
 - HTTP 404：数据库不存在对应 `character_text`，或该汉字的 `strokes_json`、`medians_json`、`rad_strokes_json` 任一列尚未配置；
@@ -452,12 +452,12 @@ curl -i http://127.0.0.1:8080/api/hanzi/%E4%B9%A6/strokes
 可通过以下步骤确认前端没有内置或兜底业务数据：
 
 1. **停后端**：关闭 Spring Boot 进程后刷新两端。管理端应显示「后台数据加载失败」红色提示且表格为空；小程序应显示「后台数据加载失败」卡片与「重新加载」按钮，不出现任何任务、汉字或记录。
-2. **空库**：仅执行 `schema.sql`、不导入 `seed.sql`，`curl http://127.0.0.1:8080/api/bootstrap` 应返回五个空数组，两端列表均为空状态。
+2. **空库**：仅执行 `schema.sql`、不导入 `seed.sql`，`curl http://192.168.108.72:8080/api/bootstrap` 应返回五个空数组，两端列表均为空状态。
 3. **核对数据源**：直接查 MySQL 并与接口响应对比，记录数与字段值应一致：
 
    ```bash
    mysql -u 用户名 -p hanzi_writing -e "SELECT id, character_text, stroke_count FROM hanzi_character;"
-   curl -s http://127.0.0.1:8080/api/bootstrap | python3 -m json.tool
+   curl -s http://192.168.108.72:8080/api/bootstrap | python3 -m json.tool
    ```
 
 4. **写操作校验**：在管理端新增用户后，`SELECT * FROM user_account WHERE username='...'` 应立即出现该行；小程序提交记录后，`practice_record` 表应出现对应行。若界面显示了数据库中不存在的数据，说明前端引入了兜底或写死数据，需要回退修复。
