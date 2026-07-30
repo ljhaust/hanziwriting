@@ -7,7 +7,12 @@
 -->
 
 <view class="mini-app">
-  <scroll-view class="page-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+  <scroll-view
+    class="page-scroll"
+    scroll-y
+    show-scrollbar="{{false}}"
+    bindscroll="handlePageScroll"
+  >
     <!-- 加载与错误状态：与正常业务内容隔离，避免把请求失败渲染成空数据。 -->
     <view wx:if="{{bootstrapLoading}}" class="data-status-card">
       <text class="panel-title">正在连接后台</text>
@@ -71,7 +76,9 @@
         </picker>
       </view>
 
-      <!-- 描红底格叠加用户书写层与笔顺演示层，三层共用同一坐标系。 -->
+      <!-- 描红底格叠加用户书写层与笔顺演示层，三层共用同一坐标系。演示动画
+           使用常驻 Canvas；完成后切换为普通 image，确保 iOS 真机滚动时最终字形
+           与米字格处于同一页面布局层。 -->
       <view class="copybook-card">
         <text wx:if="{{!strokeDemoVisible}}" class="hanzi-preview">{{currentHanzi.character_text}}</text>
         <canvas
@@ -85,12 +92,23 @@
           bindtouchcancel="stopDrawing"
         ></canvas>
         <canvas
-          wx:if="{{strokeDemoVisible}}"
           id="strokeDemoCanvas"
           type="2d"
           class="stroke-demo-canvas"
+          hidden="{{!strokeDemoCanvasVisible}}"
           disable-scroll="true"
         ></canvas>
+        <!-- PNG 导出失败时使用普通文字组件回退；两种最终层都会随米字格同步滚动。 -->
+        <image
+          wx:if="{{strokeDemoImagePath}}"
+          class="stroke-demo-image"
+          src="{{strokeDemoImagePath}}"
+          mode="scaleToFill"
+        />
+        <text
+          wx:if="{{strokeDemoVisible && !strokeDemoCanvasVisible && !strokeDemoImagePath}}"
+          class="stroke-demo-fallback"
+        >{{currentHanzi.character_text}}</text>
         <view wx:if="{{strokeDemoVisible}}" class="stroke-demo-caption">
           <text class="stroke-demo-text">{{strokeDemoText}}</text>
         </view>
