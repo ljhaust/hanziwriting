@@ -135,6 +135,8 @@ Page({
     strokePercent: 0,
     strokeHint: "请先从后台加载汉字数据。",
     strokeDemoVisible: false,
+    strokeDemoCanvasVisible: false,
+    strokeDemoImagePath: "",
     strokeDemoLoading: false,
     strokeDemoText: "点击笔顺演示查看示范。",
     strokeDemoSpeed: STROKE_DEMO_SPEED_DEFAULT,
@@ -175,6 +177,8 @@ Page({
     this.canvasContext = null;
     this.canvasSize = { width: 0, height: 0 };
     this.canvasRect = { left: 0, top: 0 };
+    // 滚动期间节流边界查询，避免每个 scroll 事件都创建新的选择器查询任务。
+    this.canvasRectRefreshPending = false;
     this.lastPoint = null;
     this.lastMidPoint = null;
     this.pendingPoint = null;
@@ -287,6 +291,35 @@ Page({
         this.initWritingCanvas(() => this.ensureCurrentStrokeGuide());
       }
     });
+  },
+
+  /**
+   * 同步练字 Canvas 在可视区域中的当前位置。
+   *
+   * <p>练字页嵌在 scroll-view 内，页面滚动后 Canvas 的视口 top 会改变。
+   * 真机部分基础库只在触摸事件中提供 clientX/clientY，此时必须重新读取
+   * Canvas 边界，否则后续轨迹会把页面滚动距离误当成笔画坐标偏移。</p>
+   *
+   * @param {WechatMiniprogram.ScrollViewScrollEvent} event scroll-view 的滚动事件，
+   *        当前实现不需要读取事件详情，但保留参数以匹配 WXML 事件契约。
+   * @returns {void} 发起一次节流后的边界刷新；Canvas 未就绪时不执行操作。
+   */
+  handlePageScroll(event) {
+    // 显式读取参数以说明该方法遵循 scroll-view 事件契约，同时避免未来移除
+    // 参数时误以为滚动事件可以直接省略同步逻辑。
+    void event;
+    if (this.data.activeTab !== "hanzi") {
+      return;
+    }
+    // 原生 Canvas 在部分 iOS 真机上不会与 scroll-view 的 WebView 内容同步合成。
+    // 动画尚未转成普通图片时直接停止，防止滚动后出现红字停在旧屏幕位置。
+    if (this.data.strokeDemoCanvasVisible) {
+      this.stopStrokeDemo(true);
+    }
+    if (!this.canvasReady) {
+      return;
+    }
+    this.refreshCanvasRect();
   },
 
   /**
@@ -538,6 +571,9 @@ Page({
       this.stopStrokeDemo(true);
     }
 
+    // scroll-view 的最后一次滚动查询可能尚未完成；这里再发起一次轻量刷新，
+    // 同时继续使用当前缓存的边界处理本次 touchstart，保证首笔不会等待异步查询。
+    this.refreshCanvasRect();
     const point = getTouchPoint(event, this.canvasRect);
     if (!this.canvasReady || !point) {
       return;
@@ -709,8 +745,13 @@ Page({
     }
 
     this.stopStrokeDemo(true);
+    // 每次播放使用独立令牌。网络请求、Canvas 初始化或图片导出任一阶段被
+    // 清空/切字/滚动打断后，旧异步回调都不能重新打开已经关闭的演示层。
+    const token = ++this.strokeDemoToken;
     this.setData({
       strokeDemoVisible: true,
+      strokeDemoCanvasVisible: true,
+      strokeDemoImagePath: "",
       strokeDemoLoading: true,
       strokeDemoText: "正在加载笔顺数据...",
       hintCount: this.data.hintCount + 1,
@@ -720,18 +761,29 @@ Page({
       const guide = this.writingGuideCharacter === this.data.currentHanzi.character_text && this.writingGuide
         ? this.writingGuide
         : await fetchStrokeGuide(this.data.currentHanzi.character_text);
+      if (token !== this.strokeDemoToken) {
+        return;
+      }
       this.strokeDemoGuide = guide;
       await this.initStrokeDemoCanvas();
+      if (token !== this.strokeDemoToken) {
+        return;
+      }
       this.setData({
         strokeDemoLoading: false,
         strokeDemoText: `正在演示 ${guide.character_text} 的笔顺`,
       });
-      await this.runStrokeDemo();
+      await this.runStrokeDemo(token);
     } catch (error) {
+      if (token !== this.strokeDemoToken) {
+        return;
+      }
       console.warn("笔顺演示加载失败。", error);
       this.setData({
         strokeDemoLoading: false,
         strokeDemoVisible: false,
+        strokeDemoCanvasVisible: false,
+        strokeDemoImagePath: "",
         strokeDemoText: "点击笔顺演示查看示范。",
       });
       // Toast 空间有限，提示错误类别；完整错误仍保留在调试控制台中。
@@ -788,16 +840,16 @@ Page({
   /**
    * 运行笔顺演示动画。
    *
+   * @param {number} token 当前播放任务的唯一令牌，用于丢弃已取消任务的异步结果。
    * @returns {Promise<void>} 动画播放完成后解析。
    */
-  async runStrokeDemo() {
+  async runStrokeDemo(token) {
     const guide = this.strokeDemoGuide;
     const context = this.strokeDemoContext;
     if (!guide || !context || !guide.strokes.length || !guide.medians.length) {
       throw new Error("笔顺数据或演示画布不可用");
     }
 
-    const token = ++this.strokeDemoToken;
     const strokeShapes = createStrokeShapes(guide);
     const total = strokeShapes.length;
     if (!total) {
@@ -846,10 +898,65 @@ Page({
 
     if (token === this.strokeDemoToken) {
       this.renderStrokeDemoFrame(strokeShapes, strokeShapes.length, 1);
-      this.setData({
-        strokeDemoText: `演示完成（${formatStrokeDemoSpeedLabel(this.data.strokeDemoSpeed)}），落笔即可开始练习。`,
-      });
+      // 等待最终帧提交到渲染线程后再导出，避免 PNG 捕获到倒数第二帧。
+      await this.waitForStrokeDemoFrame();
+      await this.freezeStrokeDemoFrame(token);
     }
+  },
+
+  /**
+   * 将演示最终帧冻结为普通图片组件使用的临时 PNG。
+   *
+   * <p>Canvas 属于小程序原生渲染层，在部分 iOS 版本中不会跟随 scroll-view
+   * 同步移动；普通 image 与米字格处于同一页面布局层，滚动时不会发生错位。
+   * 导出失败时隐藏原生 Canvas，并由 WXML 的普通文字层展示无错位回退。</p>
+   *
+   * @param {number} token 当前播放任务的唯一令牌，用于阻止过期导出结果覆盖新状态。
+   * @returns {Promise<void>} 图片或文字回退层完成切换后解析。
+   */
+  freezeStrokeDemoFrame(token) {
+    return new Promise((resolve) => {
+      const canvas = this.strokeDemoCanvasNode;
+      const completedText = `演示完成（${formatStrokeDemoSpeedLabel(this.data.strokeDemoSpeed)}），落笔即可开始练习。`;
+
+      /**
+       * 隐藏原生 Canvas，并切换到可随页面滚动的最终展示层。
+       *
+       * @param {string} imagePath 成功导出的临时 PNG 路径；空字符串表示使用文字回退。
+       * @returns {void} 状态切换完成后释放 Promise。
+       */
+      const showScrollableResult = (imagePath) => {
+        if (token !== this.strokeDemoToken) {
+          resolve();
+          return;
+        }
+        this.setData({
+          strokeDemoCanvasVisible: false,
+          strokeDemoImagePath: imagePath,
+          strokeDemoText: completedText,
+        }, resolve);
+      };
+
+      if (!canvas || typeof wx.canvasToTempFilePath !== "function") {
+        showScrollableResult("");
+        return;
+      }
+
+      wx.canvasToTempFilePath({
+        canvas,
+        fileType: "png",
+        success: (result) => {
+          const imagePath = result && result.tempFilePath ? result.tempFilePath : "";
+          showScrollableResult(imagePath);
+        },
+        fail: (error) => {
+          // 不向用户暴露底层路径或设备信息；控制台仅记录平台返回的错误对象，
+          // 页面则无缝降级为普通文字层，继续保证滚动位置正确。
+          console.warn("笔顺演示最终帧导出失败，已使用文字回退。", error);
+          showScrollableResult("");
+        },
+      }, this);
+    });
   },
 
   /**
@@ -930,6 +1037,8 @@ Page({
     this.strokeDemoSize = { width: 0, height: 0 };
     this.setData({
       strokeDemoVisible: false,
+      strokeDemoCanvasVisible: false,
+      strokeDemoImagePath: "",
       strokeDemoLoading: false,
       strokeDemoText: "点击笔顺演示查看示范。",
     });
@@ -980,12 +1089,44 @@ Page({
             left: Number(canvasInfo.left) || 0,
             top: Number(canvasInfo.top) || 0,
           };
+          this.canvasRectRefreshPending = false;
 
           if (typeof callback === "function") {
             callback();
           }
         });
     });
+  },
+
+  /**
+   * 异步读取练字 Canvas 相对当前视口的边界。
+   *
+   * <p>该方法只更新坐标基准，不重置 Canvas 尺寸或清空已有笔迹，因此可以
+   * 安全地在 scroll-view 的高频滚动事件中调用。一次查询未完成前会合并后续
+   * 事件，避免滚动时堆积选择器任务并造成渲染延迟。</p>
+   *
+   * @returns {void} 发起或合并一次边界查询；没有可用 Canvas 时直接返回。
+   */
+  refreshCanvasRect() {
+    if (!this.canvasReady || this.canvasRectRefreshPending) {
+      return;
+    }
+
+    this.canvasRectRefreshPending = true;
+    wx.createSelectorQuery()
+      .in(this)
+      .select(WRITING_CANVAS_SELECTOR)
+      .fields({ rect: true })
+      .exec((results) => {
+        const canvasRect = results && results[0];
+        if (canvasRect) {
+          this.canvasRect = {
+            left: Number(canvasRect.left) || 0,
+            top: Number(canvasRect.top) || 0,
+          };
+        }
+        this.canvasRectRefreshPending = false;
+      });
   },
 
   /**
