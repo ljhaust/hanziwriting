@@ -2,11 +2,13 @@ import { onMounted, ref } from 'vue';
 import {
   authenticateAdmin,
   createHanzi as apiCreateHanzi,
+  createPoem as apiCreatePoem,
   createTask as apiCreateTask,
   createUser as apiCreateUser,
   deletePracticeRecord,
   deleteTask,
   fetchBootstrapData,
+  generateHanzi as apiGenerateHanzi,
   updateHanziRecommended,
   updateUserStatus,
 } from '../api/client';
@@ -33,6 +35,7 @@ export function usePlatformState() {
   const records = ref([]);
   const isLoading = ref(false);
   const loadError = ref('');
+  const initialLoadCompleted = ref(false);
 
   /**
    * 从后端重新加载管理端全部业务数据。
@@ -57,6 +60,7 @@ export function usePlatformState() {
       throw error;
     } finally {
       isLoading.value = false;
+      initialLoadCompleted.value = true;
     }
   }
 
@@ -109,6 +113,36 @@ export function usePlatformState() {
     assertEntity(savedHanzi, '新增汉字接口未返回有效数据');
     hanziDb.value = [savedHanzi, ...hanziDb.value];
     return savedHanzi;
+  }
+
+  /**
+   * 按年级批量补充字库，并把后端实际新增项合并到当前列表。
+   *
+   * @param {{grade_level: string, count: number}} generation 批量补充条件。
+   * @returns {Promise<object[]>} 后端实际新增的汉字，库存不足时数量可少于请求值。
+   */
+  async function generateHanzi(generation) {
+    const generatedHanzi = await apiGenerateHanzi(generation);
+    if (!Array.isArray(generatedHanzi)) {
+      throw new Error('批量补充接口未返回有效列表');
+    }
+    generatedHanzi.forEach((hanzi) => assertEntity(hanzi, '批量补充接口包含无效汉字'));
+    const generatedIds = new Set(generatedHanzi.map((hanzi) => hanzi.id));
+    hanziDb.value = [...generatedHanzi, ...hanziDb.value.filter((hanzi) => !generatedIds.has(hanzi.id))];
+    return generatedHanzi;
+  }
+
+  /**
+   * 新增古诗并使用后端响应更新资源列表。
+   *
+   * @param {object} poem 古诗表单数据。
+   * @returns {Promise<object>} 数据库保存后的完整古诗。
+   */
+  async function createPoem(poem) {
+    const savedPoem = await apiCreatePoem(poem);
+    assertEntity(savedPoem, '新增古诗接口未返回有效数据');
+    poemsDb.value = [savedPoem, ...poemsDb.value];
+    return savedPoem;
   }
 
   /**
@@ -205,10 +239,13 @@ export function usePlatformState() {
     records,
     isLoading,
     loadError,
+    initialLoadCompleted,
     reload,
     login,
     createHanzi,
+    createPoem,
     createUser,
+    generateHanzi,
     publishTask,
     removeRecord,
     removeTask,

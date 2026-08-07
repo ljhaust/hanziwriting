@@ -179,6 +179,32 @@ export function createHanzi(hanzi) {
 }
 
 /**
+ * 按年级从后端内置字库随机补充汉字。
+ *
+ * @param {{grade_level: string, count: number}} generation 年级与本次期望补充数量。
+ * @returns {Promise<object[]>} 后端实际新增的完整汉字列表。
+ */
+export function generateHanzi(generation) {
+  return request('/api/hanzi/generate', {
+    method: 'POST',
+    body: JSON.stringify(generation),
+  });
+}
+
+/**
+ * 创建古诗资源。
+ *
+ * @param {object} poem 管理员填写的古诗字段。
+ * @returns {Promise<object>} 数据库保存后的完整古诗资源。
+ */
+export function createPoem(poem) {
+  return request('/api/poems', {
+    method: 'POST',
+    body: JSON.stringify(poem),
+  });
+}
+
+/**
  * 修改汉字推荐状态。
  *
  * @param {string} hanziId 汉字资源唯一标识。

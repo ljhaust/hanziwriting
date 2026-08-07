@@ -218,6 +218,43 @@ button {
   border-radius: 8px;
 }
 
+/* 长用户 ID 使用缩略文本和独立复制操作，避免微信用户行撑破表格。 */
+.user-id-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.user-id-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 账号状态将开关与业务含义同时展示，避免管理员误解开关作用。 */
+.user-status-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.user-status-control span {
+  font-size: 12px;
+}
+
+.status-enabled {
+  color: #047857;
+}
+
+.status-disabled {
+  color: #b91c1c;
+}
+
 /* 任务资源选择器允许标签换行，避免资源较多时撑破发布弹窗。 */
 .task-item-picker {
   display: flex;

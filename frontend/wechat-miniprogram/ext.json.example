@@ -3,6 +3,6 @@
   "extAppid": "wx33e3c288d2f0db88",
   "directCommit": false,
   "ext": {
-    "apiBaseUrl": "http://192.168.108.72:8080"
+    "apiBaseUrl": "http://127.0.0.1:8080"
   }
 }
