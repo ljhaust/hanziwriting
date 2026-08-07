@@ -18,6 +18,20 @@ const STROKE_VALIDATION_STORAGE_KEY = "hanziStrokeValidationEnabled";
 /** 微信登录用户的本地缓存键，用于跨次启动免重新登录。 */
 const WX_LOGIN_USER_STORAGE_KEY = "wxLoginUser";
 
+/** 当前功能页签的本地缓存键，用于页面被微信回收重建后恢复用户所在位置。 */
+const ACTIVE_TAB_STORAGE_KEY = "hanziActiveTab";
+
+/** 小程序允许持久化的功能页签白名单，避免损坏缓存把页面切到不存在的内容。 */
+const MINI_APP_TAB_KEYS = ["home", "hanzi", "poem", "records", "profile"];
+
+/**
+ * 微信隐私策略下可能返回的占位昵称。
+ *
+ * 这些文本不能被当作真实微信资料；命中时要求用户通过 type="nickname"
+ * 输入框主动选择或填写展示昵称，再由登录接口保存。
+ */
+const WX_PLACEHOLDER_NICKNAMES = ["微信用户", "同学"];
+
 /** 笔顺演示速度的本地存储键。 */
 const STROKE_DEMO_SPEED_STORAGE_KEY = "hanziStrokeDemoSpeed";
 
@@ -111,6 +125,7 @@ Page({
     bootstrapError: "",
     loginVisible: false,
     loginLoading: false,
+    loginNickname: "",
     currentStudent: null,
     users: [],
     consecutiveDays: 0,
@@ -202,14 +217,47 @@ Page({
     this.poemIsDrawing = false;
     this.poemLastPoint = null;
     this.poemPracticeStartedAt = 0;
-    // 读取本地登录态：有缓存则免登录直接进入，没有则展示登录引导层。
-    this.cachedLoginUser = wx.getStorageSync(WX_LOGIN_USER_STORAGE_KEY) || null;
+    // onLoad 之后微信会立即调用一次 onShow；使用标记区分首次显示与真正的
+    // 前后台恢复，避免首次启动重复请求聚合接口。
+    this.hasCompletedInitialShow = false;
+    // 分别恢复登录身份和当前页签。页面被系统回收并重新创建时，业务上下文
+    // 仍然保留，不会因为 data 的默认值而误回首页或看起来像退出登录。
+    this.cachedLoginUser = readPersistedLoginUser();
+    const storedActiveTab = readPersistedActiveTab();
+    const requiresNickname = needsNicknameCompletion(this.cachedLoginUser);
     this.setData({
+      activeTab: storedActiveTab,
       strokeValidationEnabled: storedValidationSetting !== false,
       strokeDemoSpeed: storedStrokeDemoSpeed,
       strokeDemoSpeedLabel: formatStrokeDemoSpeedLabel(storedStrokeDemoSpeed),
-      loginVisible: !this.cachedLoginUser,
+      loginVisible: !this.cachedLoginUser || requiresNickname,
+      loginNickname: requiresNickname ? "" : getUsableNickname(this.cachedLoginUser),
     }, () => this.syncDerivedState());
+    this.loadBootstrapData();
+  },
+
+  /**
+   * 页面从后台重新显示时重新读取持久化身份。
+   *
+   * @returns {void} 无返回值；仅在缓存与内存不一致时同步界面，不重置当前页签。
+   */
+  onShow() {
+    const persistedUser = readPersistedLoginUser();
+    const persistedUserId = persistedUser && persistedUser.id;
+    const memoryUserId = this.cachedLoginUser && this.cachedLoginUser.id;
+    if (persistedUserId !== memoryUserId) {
+      this.cachedLoginUser = persistedUser;
+      this.setData({
+        loginVisible: !persistedUser || needsNicknameCompletion(persistedUser),
+        loginNickname: needsNicknameCompletion(persistedUser) ? "" : getUsableNickname(persistedUser),
+      }, () => this.syncDerivedState());
+    }
+    if (!this.hasCompletedInitialShow) {
+      this.hasCompletedInitialShow = true;
+      return;
+    }
+    // 从后台回到小程序时刷新账号状态；管理员已禁用的用户会在聚合数据返回后
+    // 被明确退出，普通的页面隐藏/显示不会清除本地会话。
     this.loadBootstrapData();
   },
 
@@ -247,6 +295,17 @@ Page({
     this.setData({ bootstrapLoading: true, bootstrapError: "" });
     return fetchBootstrapData()
       .then((data) => {
+        const matchedLoginUser = findUserById(data.users, this.cachedLoginUser && this.cachedLoginUser.id);
+        if (isDisabledUser(matchedLoginUser)) {
+          this.clearLoginSession("账号已被管理员禁用，请联系管理员后重新登录。");
+        } else if (matchedLoginUser) {
+          // 使用服务端最新昵称与状态刷新本地缓存，避免旧的占位昵称长期滞留。
+          this.cachedLoginUser = matchedLoginUser;
+          persistLoginUser(matchedLoginUser);
+          if (needsNicknameCompletion(matchedLoginUser)) {
+            this.setData({ loginVisible: true, loginNickname: "" });
+          }
+        }
         this.setData({
           bootstrapLoading: false,
           bootstrapError: "",
@@ -283,6 +342,10 @@ Page({
    */
   switchTab(event) {
     const nextTab = event.currentTarget.dataset.tab;
+    if (!MINI_APP_TAB_KEYS.includes(nextTab)) {
+      return;
+    }
+    persistActiveTab(nextTab);
     this.setData({ activeTab: nextTab }, () => {
       if (nextTab !== "hanzi") {
         this.stopStrokeDemo(true);
@@ -335,15 +398,19 @@ Page({
   /**
    * 触发微信登录。
    *
-   * <p>并发获取 wx.login 的 code 与 wx.getUserProfile 的用户资料，发送给后端
-   * 换取 openid 识别或新建的学生用户；成功后写入本地缓存并关闭登录引导层。
-   * wx.getUserProfile 在用户拒绝授权或基础库不支持时使用空资料兜底，
-   * 后端会用默认昵称“同学”兜底，保证登录流程不被打断。</p>
+   * <p>微信已不保证 wx.getUserProfile 返回真实昵称，因此页面使用官方
+   * type="nickname" 输入组件，让用户主动选择微信建议昵称或自行填写。
+   * 本方法只提交用户确认过的昵称，不伪造、不猜测真实微信资料。</p>
    *
    * @returns {void} 无返回值。
    */
   handleWxLogin() {
     if (this.data.loginLoading) {
+      return;
+    }
+    const nickname = String(this.data.loginNickname || "").trim();
+    if (!nickname) {
+      wx.showToast({ title: "请先选择或填写昵称", icon: "none" });
       return;
     }
     this.setData({ loginLoading: true });
@@ -354,27 +421,19 @@ Page({
         fail: () => reject(new Error("微信登录凭证获取失败")),
       });
     });
-    const userProfile = new Promise((resolve) => {
-      if (typeof wx.getUserProfile !== "function") {
-        resolve({});
-        return;
-      }
-      wx.getUserProfile({
-        desc: "用于展示练字昵称",
-        success: (res) => resolve((res && res.userInfo) || {}),
-        fail: () => resolve({}),
-      });
-    });
-
-    Promise.all([loginCode, userProfile])
-      .then(([code, userInfo]) => wxLogin(code, {
-        nickname: userInfo.nickName || "",
-        avatarUrl: userInfo.avatarUrl || "",
-      }))
+    loginCode
+      .then((code) => wxLogin(code, { nickname }))
       .then((user) => {
+        if (isDisabledUser(user)) {
+          throw new Error("账号已被管理员禁用，请联系管理员");
+        }
+        if (needsNicknameCompletion(user)) {
+          throw new Error("昵称未能保存，请确认后台服务已更新后重试");
+        }
         this.cachedLoginUser = user;
-        wx.setStorageSync(WX_LOGIN_USER_STORAGE_KEY, user);
-        this.setData({ loginVisible: false, loginLoading: false }, () => this.syncDerivedState());
+        persistLoginUser(user);
+        const users = replaceUserInList(this.data.users, user);
+        this.setData({ users, loginVisible: false, loginLoading: false }, () => this.syncDerivedState());
         wx.showToast({ title: "登录成功", icon: "success" });
       })
       .catch((error) => {
@@ -385,14 +444,38 @@ Page({
   },
 
   /**
+   * 同步登录昵称输入值。
+   *
+   * @param {WechatMiniprogram.Input} event 微信昵称输入组件事件，detail.value 为用户确认的文本。
+   * @returns {void} 无返回值；最长保留 64 个字符以匹配服务端字段约束。
+   */
+  handleLoginNicknameInput(event) {
+    const nickname = String(event.detail && event.detail.value || "").slice(0, 64);
+    this.setData({ loginNickname: nickname });
+  },
+
+  /**
    * 退出登录并重新展示登录引导层。
    *
    * @returns {void} 无返回值。
    */
   logout() {
+    this.clearLoginSession("");
+  },
+
+  /**
+   * 清除当前登录身份并展示登录层。
+   *
+   * @param {string} reason 非空时向用户说明被强制退出的原因；主动退出传空字符串。
+   * @returns {void} 无返回值。
+   */
+  clearLoginSession(reason) {
     this.cachedLoginUser = null;
-    wx.removeStorageSync(WX_LOGIN_USER_STORAGE_KEY);
-    this.setData({ loginVisible: true }, () => this.syncDerivedState());
+    removePersistedLoginUser();
+    this.setData({ loginVisible: true, loginLoading: false, loginNickname: "" }, () => this.syncDerivedState());
+    if (reason) {
+      wx.showModal({ title: "登录已失效", content: reason, showCancel: false });
+    }
   },
 
   /**
@@ -1649,6 +1732,134 @@ Page({
 });
 
 /**
+ * 从本地存储读取微信登录用户。
+ *
+ * @returns {object|null} 结构有效且包含用户 ID 时返回缓存用户，否则返回 null。
+ */
+function readPersistedLoginUser() {
+  try {
+    const storedUser = wx.getStorageSync(WX_LOGIN_USER_STORAGE_KEY);
+    return storedUser && typeof storedUser === "object" && storedUser.id ? storedUser : null;
+  } catch (error) {
+    console.warn("读取微信登录缓存失败。", error);
+    return null;
+  }
+}
+
+/**
+ * 持久化微信登录用户。
+ *
+ * @param {object} user 后端确认过的当前用户，不得包含登录 code 等临时凭证。
+ * @returns {void} 无返回值；写入失败时记录警告，当前内存会话仍可继续使用。
+ */
+function persistLoginUser(user) {
+  try {
+    wx.setStorageSync(WX_LOGIN_USER_STORAGE_KEY, user);
+  } catch (error) {
+    console.warn("保存微信登录缓存失败。", error);
+  }
+}
+
+/**
+ * 删除持久化微信登录用户。
+ *
+ * @returns {void} 无返回值；即使底层存储异常也保持内存退出流程可完成。
+ */
+function removePersistedLoginUser() {
+  try {
+    wx.removeStorageSync(WX_LOGIN_USER_STORAGE_KEY);
+  } catch (error) {
+    console.warn("清除微信登录缓存失败。", error);
+  }
+}
+
+/**
+ * 读取上次功能页签。
+ *
+ * @returns {string} 白名单内的缓存页签；无缓存或缓存损坏时返回首页。
+ */
+function readPersistedActiveTab() {
+  try {
+    const storedTab = wx.getStorageSync(ACTIVE_TAB_STORAGE_KEY);
+    return MINI_APP_TAB_KEYS.includes(storedTab) ? storedTab : "home";
+  } catch (error) {
+    console.warn("读取页面位置缓存失败。", error);
+    return "home";
+  }
+}
+
+/**
+ * 保存当前功能页签。
+ *
+ * @param {string} activeTab 已通过白名单校验的页签键。
+ * @returns {void} 无返回值；存储失败不影响本次页面切换。
+ */
+function persistActiveTab(activeTab) {
+  try {
+    wx.setStorageSync(ACTIVE_TAB_STORAGE_KEY, activeTab);
+  } catch (error) {
+    console.warn("保存页面位置缓存失败。", error);
+  }
+}
+
+/**
+ * 判断用户是否仍需主动完善昵称。
+ *
+ * @param {object|null} user 当前微信用户。
+ * @returns {boolean} 昵称为空或属于微信隐私占位文本时返回 true。
+ */
+function needsNicknameCompletion(user) {
+  const nickname = getUsableNickname(user);
+  return !nickname || WX_PLACEHOLDER_NICKNAMES.includes(nickname);
+}
+
+/**
+ * 读取可展示昵称。
+ *
+ * @param {object|null} user 当前用户对象。
+ * @returns {string} 去除首尾空白后的昵称；无昵称时返回空字符串。
+ */
+function getUsableNickname(user) {
+  return String(user && user.nickname || "").trim();
+}
+
+/**
+ * 按用户 ID 查找服务端最新用户。
+ *
+ * @param {Array<object>} users 后端用户列表。
+ * @param {string} userId 当前登录用户 ID。
+ * @returns {object|null} 找到时返回用户，否则返回 null。
+ */
+function findUserById(users, userId) {
+  if (!userId) {
+    return null;
+  }
+  return toArraySafe(users).find((user) => user.id === userId) || null;
+}
+
+/**
+ * 判断账号是否被管理员禁用。
+ *
+ * @param {object|null} user 后端用户对象。
+ * @returns {boolean} status 明确为 disabled 时返回 true。
+ */
+function isDisabledUser(user) {
+  return String(user && user.status || "").toLowerCase() === "disabled";
+}
+
+/**
+ * 用登录接口返回的最新用户替换列表中的旧记录。
+ *
+ * @param {Array<object>} users 当前聚合用户列表。
+ * @param {object} currentUser 登录接口返回的当前用户。
+ * @returns {Array<object>} 包含且仅包含一条当前用户记录的新数组。
+ */
+function replaceUserInList(users, currentUser) {
+  const remainingUsers = toArraySafe(users).filter((user) => user.id !== currentUser.id);
+  return remainingUsers.concat(currentUser);
+}
+
+/**
  * 格式化首页任务展示字段。
  *
  * @param {object} task 原始任务对象。
@@ -1673,8 +1884,8 @@ function formatTask(task, hanziList, poemList) {
 /**
  * 查找当前学生用户。
  *
- * <p>已微信登录时优先用缓存登录用户（并尝试以最新 users 列表刷新其字段）；
- * 未登录时回退到 users 中第一个学生，保持旧首页可访问。</p>
+ * <p>已微信登录时优先用服务端最新用户刷新缓存字段；未登录时返回空对象，
+ * 避免登录遮罩背后误展示数据库中的其他学生资料。</p>
  *
  * @param {Array<object>} users 用户列表。
  * @param {object} cachedLoginUser 本地缓存的微信登录用户。
@@ -1685,7 +1896,7 @@ function findCurrentStudent(users, cachedLoginUser) {
     const matched = toArraySafe(users).find((user) => user.id === cachedLoginUser.id);
     return matched || cachedLoginUser;
   }
-  return toArraySafe(users).find((user) => user.user_type === "student") || {};
+  return {};
 }
 
 /**

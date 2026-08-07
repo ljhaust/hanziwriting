@@ -2,6 +2,7 @@ package com.example.hanzi.service;
 
 import com.example.hanzi.domain.HanziCharacter;
 import com.example.hanzi.domain.Poem;
+import com.example.hanzi.domain.PoemSentence;
 import com.example.hanzi.domain.PracticeRecord;
 import com.example.hanzi.domain.PracticeTask;
 import com.example.hanzi.domain.TaskItem;
@@ -14,6 +15,8 @@ import com.example.hanzi.repository.PracticeRecordRepository;
 import com.example.hanzi.repository.PracticeTaskRepository;
 import com.example.hanzi.repository.UserAccountRepository;
 import com.example.hanzi.web.InvalidCredentialsException;
+import com.example.hanzi.web.AccountDisabledException;
+import com.example.hanzi.web.InvalidRequestException;
 import com.example.hanzi.web.ResourceNotFoundException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -22,6 +25,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -37,6 +45,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class PlatformService {
     private static final String USER_ID_PREFIX = "U";
     private static final String HANZI_ID_PREFIX = "H";
+    private static final String POEM_ID_PREFIX = "P";
+    private static final String POEM_SENTENCE_ID_PREFIX = "PS";
     private static final String TASK_ID_PREFIX = "T";
     private static final String TASK_ITEM_ID_PREFIX = "TI";
     private static final String RECORD_ID_PREFIX = "R";
@@ -45,6 +55,7 @@ public class PlatformService {
     private static final String TEACHER_USER_TYPE = "teacher";
     private static final String DEFAULT_STUDENT_USER_TYPE = "student";
     private static final String DEFAULT_WX_NICKNAME = "同学";
+    private static final String DISABLED_STATUS = "disabled";
     private static final String DEFAULT_ACTIVE_TASK_STATUS = "active";
     private static final long DEFAULT_TASK_DURATION_HOURS = 24L;
     private static final DateTimeFormatter BUSINESS_TIME_FORMATTER =
@@ -124,6 +135,9 @@ public class PlatformService {
     public UserAccount authenticate(String username, String password) {
         UserAccount user = userRepository.findByUsername(username)
             .orElseThrow(InvalidCredentialsException::new);
+        if (DISABLED_STATUS.equals(user.getStatus())) {
+            throw new AccountDisabledException();
+        }
         boolean managementRole = ADMIN_USER_TYPE.equals(user.getUserType())
             || TEACHER_USER_TYPE.equals(user.getUserType());
         boolean enabled = DEFAULT_ENABLED_STATUS.equals(user.getStatus());
@@ -151,12 +165,22 @@ public class PlatformService {
     public UserAccount loginByOpenid(String openid, String nickname, String avatarUrl) {
         Optional<UserAccount> existing = userRepository.findByOpenid(openid);
         if (existing.isPresent()) {
-            return existing.get();
+            UserAccount user = existing.get();
+            if (DISABLED_STATUS.equals(user.getStatus())) {
+                throw new AccountDisabledException();
+            }
+            if (!isBlank(nickname) && !nickname.trim().equals(user.getNickname())) {
+                // 微信资料可能在首次授权后变更，仅用本次非空授权值更新，
+                // 避免用户拒绝授权时把已有真实昵称覆盖为默认值。
+                user.setNickname(nickname.trim());
+                return userRepository.save(user);
+            }
+            return user;
         }
 
         UserAccount user = new UserAccount();
         user.setUsername("wx_" + (openid == null ? "" : openid));
-        user.setNickname(isBlank(nickname) ? DEFAULT_WX_NICKNAME : nickname);
+        user.setNickname(isBlank(nickname) ? DEFAULT_WX_NICKNAME : nickname.trim());
         user.setUserType(DEFAULT_STUDENT_USER_TYPE);
         user.setOpenid(openid);
         return saveUser(user);
@@ -215,13 +239,85 @@ public class PlatformService {
      */
     @Transactional
     public HanziCharacter saveHanzi(HanziCharacter hanzi) {
+        if (hanziRepository.findByCharacterText(hanzi.getCharacterText()).isPresent()) {
+            throw new InvalidRequestException("该汉字已存在字库中");
+        }
+        LocalHanziCatalog.Definition definition = LocalHanziCatalog.find(hanzi.getCharacterText())
+            .orElseThrow(() -> new InvalidRequestException(
+                "本地受控字表尚未收录该汉字，无法自动补全属性"
+            ));
         if (isBlank(hanzi.getId())) {
             hanzi.setId(generateId(HANZI_ID_PREFIX));
         }
-        if (hanzi.getRecommended() == null) {
-            hanzi.setRecommended(Boolean.FALSE);
-        }
+        // 忽略调用方可能传入的派生属性，统一以受控字表为真实来源。
+        hanzi.setPinyin(definition.getPinyin());
+        hanzi.setRadical(definition.getRadical());
+        hanzi.setStrokeCount(definition.getStrokeCount());
+        hanzi.setRecommended(Boolean.FALSE);
+        hanzi.setTags(new ArrayList<String>(Arrays.asList("分年级字表")));
+        hanzi.setCompounds(new ArrayList<String>(definition.getCompounds()));
         return hanziRepository.save(hanzi);
+    }
+
+    /**
+     * 按年级随机新增字库中尚不存在的受控汉字。
+     *
+     * <p>实际新增数量不会超过 count；当该年级可用缺失字少于 count 时，
+     * 返回所有可用缺失字，已存在字绝不重复插入。</p>
+     *
+     * @param gradeLevel 目标年级名称。
+     * @param count 本次最多新增数量。
+     * @return 本次实际创建的汉字列表。
+     */
+    @Transactional
+    public List<HanziCharacter> generateHanzi(String gradeLevel, int count) {
+        List<LocalHanziCatalog.Definition> candidates = LocalHanziCatalog.findByGrade(gradeLevel);
+        if (candidates.isEmpty()) {
+            throw new InvalidRequestException("本地受控字表不支持该年级");
+        }
+
+        Set<String> existingCharacters = new HashSet<String>();
+        for (HanziCharacter existing : hanziRepository.findAll()) {
+            existingCharacters.add(existing.getCharacterText());
+        }
+        List<LocalHanziCatalog.Definition> missing = new ArrayList<LocalHanziCatalog.Definition>();
+        for (LocalHanziCatalog.Definition candidate : candidates) {
+            if (!existingCharacters.contains(candidate.getCharacterText())) {
+                missing.add(candidate);
+            }
+        }
+        Collections.shuffle(missing);
+
+        List<HanziCharacter> created = new ArrayList<HanziCharacter>();
+        int createCount = Math.min(count, missing.size());
+        for (int index = 0; index < createCount; index++) {
+            LocalHanziCatalog.Definition definition = missing.get(index);
+            HanziCharacter hanzi = createHanziFromDefinition(definition, gradeLevel);
+            created.add(hanziRepository.save(hanzi));
+        }
+        return created;
+    }
+
+    /**
+     * 把受控字表条目转换为可持久化的汉字实体。
+     *
+     * @param definition 已校验的本地字表条目。
+     * @param gradeLevel 最终保存的业务年级。
+     * @return 已补全主键、基础属性、标签和组词的未持久化实体。
+     */
+    private HanziCharacter createHanziFromDefinition(LocalHanziCatalog.Definition definition,
+                                                       String gradeLevel) {
+        HanziCharacter hanzi = new HanziCharacter();
+        hanzi.setId(generateId(HANZI_ID_PREFIX));
+        hanzi.setCharacterText(definition.getCharacterText());
+        hanzi.setPinyin(definition.getPinyin());
+        hanzi.setRadical(definition.getRadical());
+        hanzi.setStrokeCount(definition.getStrokeCount());
+        hanzi.setGradeLevel(gradeLevel);
+        hanzi.setRecommended(Boolean.FALSE);
+        hanzi.setTags(new ArrayList<String>(Arrays.asList("分年级字表")));
+        hanzi.setCompounds(new ArrayList<String>(definition.getCompounds()));
+        return hanzi;
     }
 
     /**
@@ -270,6 +366,52 @@ public class PlatformService {
     @Transactional(readOnly = true)
     public List<Poem> listPoems() {
         return poemRepository.findAll();
+    }
+
+    /**
+     * 新增古诗并由服务端生成主键和练习用逐句明细。
+     *
+     * @param poem 已包含标题、作者、朝代、年级和正文的古诗实体。
+     * @return 已持久化的古诗及其逐句明细。
+     */
+    @Transactional
+    public Poem savePoem(Poem poem) {
+        if (isBlank(poem.getId())) {
+            poem.setId(generateId(POEM_ID_PREFIX));
+        }
+        if (poem.getSentences() == null || poem.getSentences().isEmpty()) {
+            poem.setSentences(createPoemSentences(poem.getContent()));
+        } else {
+            for (PoemSentence sentence : poem.getSentences()) {
+                if (isBlank(sentence.getId())) {
+                    sentence.setId(generateId(POEM_SENTENCE_ID_PREFIX));
+                }
+            }
+        }
+        return poemRepository.save(poem);
+    }
+
+    /**
+     * 根据古诗正文标点生成背诵练习所需的有序诗句。
+     *
+     * @param content 已通过非空校验的古诗全文。
+     * @return 不含空句的有序诗句列表。
+     */
+    private List<PoemSentence> createPoemSentences(String content) {
+        List<PoemSentence> sentences = new ArrayList<PoemSentence>();
+        String[] sentenceTexts = content.split("[，。！？；\\n]+");
+        for (String sentenceText : sentenceTexts) {
+            String normalizedText = sentenceText.trim();
+            if (normalizedText.isEmpty()) {
+                continue;
+            }
+            PoemSentence sentence = new PoemSentence();
+            sentence.setId(generateId(POEM_SENTENCE_ID_PREFIX));
+            sentence.setSentenceText(normalizedText);
+            sentence.setSortNo(sentences.size() + 1);
+            sentences.add(sentence);
+        }
+        return sentences;
     }
 
     /**

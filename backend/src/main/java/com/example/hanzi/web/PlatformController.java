@@ -7,8 +7,11 @@ import com.example.hanzi.domain.PracticeTask;
 import com.example.hanzi.domain.UserAccount;
 import com.example.hanzi.dto.BootstrapResponse;
 import com.example.hanzi.dto.HanziRecommendedRequest;
+import com.example.hanzi.dto.HanziCreateRequest;
+import com.example.hanzi.dto.HanziGenerateRequest;
 import com.example.hanzi.dto.HanziStrokeResponse;
 import com.example.hanzi.dto.LoginRequest;
+import com.example.hanzi.dto.PoemCreateRequest;
 import com.example.hanzi.dto.UserStatusRequest;
 import com.example.hanzi.dto.WxLoginRequest;
 import com.example.hanzi.service.PlatformService;
@@ -128,12 +131,26 @@ public class PlatformController {
     /**
      * 创建汉字资源。
      *
-     * @param hanzi 管理端提交的汉字字段，主键可省略。
-     * @return 数据库保存后的汉字资源。
+     * @param request 只包含单个汉字和适用年级的请求。
+     * @return 由本地受控字表补全属性并保存后的汉字资源。
      */
     @PostMapping("/hanzi")
-    public HanziCharacter createHanzi(@Valid @RequestBody HanziCharacter hanzi) {
+    public HanziCharacter createHanzi(@Valid @RequestBody HanziCreateRequest request) {
+        HanziCharacter hanzi = new HanziCharacter();
+        hanzi.setCharacterText(request.getCharacterText());
+        hanzi.setGradeLevel(request.getGradeLevel());
         return platformService.saveHanzi(hanzi);
+    }
+
+    /**
+     * 按年级随机批量生成字库中尚不存在的汉字。
+     *
+     * @param request 包含 grade_level 和 1 至 100 的 count。
+     * @return 本次实际新增的汉字列表；可用缺失字不足时可少于 count。
+     */
+    @PostMapping("/hanzi/generate")
+    public List<HanziCharacter> generateHanzi(@Valid @RequestBody HanziGenerateRequest request) {
+        return platformService.generateHanzi(request.getGradeLevel(), request.getCount());
     }
 
     /**
@@ -168,6 +185,26 @@ public class PlatformController {
     @GetMapping("/poems")
     public List<Poem> poems() {
         return platformService.listPoems();
+    }
+
+    /**
+     * 新增古诗资源并持久化逐句练习明细。
+     *
+     * @param request 包含标题、作者、朝代、年级和正文的请求。
+     * @return 数据库保存后的古诗资源。
+     */
+    @PostMapping("/poems")
+    public Poem createPoem(@Valid @RequestBody PoemCreateRequest request) {
+        Poem poem = new Poem();
+        poem.setTitle(request.getTitle());
+        poem.setAuthor(request.getAuthor());
+        poem.setDynasty(request.getDynasty());
+        poem.setContent(request.getContent());
+        poem.setGradeLevel(request.getGradeLevel());
+        poem.setAnnotation(request.getAnnotation());
+        poem.setTranslation(request.getTranslation());
+        poem.setTextbookVersion(request.getTextbookVersion());
+        return platformService.savePoem(poem);
     }
 
     /**

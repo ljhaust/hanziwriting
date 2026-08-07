@@ -266,13 +266,24 @@
     </view>
   </scroll-view>
 
-  <!-- 登录引导层：未登录时遮罩整个页面，提示微信登录。 -->
+  <!-- 登录引导层：昵称必须由用户通过微信昵称组件主动选择或填写。微信平台
+       不再保证登录接口直接返回真实昵称，因此不能用“微信用户”冒充真实资料。 -->
   <view wx:if="{{loginVisible}}" class="login-mask">
     <view class="login-card">
       <view class="login-logo">字</view>
       <text class="login-title">欢迎来到汉字书写</text>
-      <text class="login-desc">请使用微信登录后开始练字与背诗。</text>
-      <button class="primary-action login-action" loading="{{loginLoading}}" bindtap="handleWxLogin">微信登录</button>
+      <text class="login-desc">微信不会自动向小程序提供真实昵称。请点击下方输入框，从微信建议中选择昵称或自行填写。</text>
+      <input
+        class="nickname-input"
+        type="nickname"
+        value="{{loginNickname}}"
+        maxlength="64"
+        confirm-type="done"
+        placeholder="选择或填写展示昵称"
+        bindinput="handleLoginNicknameInput"
+      />
+      <button class="primary-action login-action" loading="{{loginLoading}}" disabled="{{!loginNickname}}" bindtap="handleWxLogin">确认昵称并登录</button>
+      <text class="login-privacy-tip">昵称仅用于练习记录和管理端识别，不会读取微信号。</text>
     </view>
   </view>
 

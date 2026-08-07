@@ -35,7 +35,7 @@
     <template v-else>
       <aside class="admin-sidebar">
         <div class="admin-profile">
-          <strong>{{ adminUser.nickname }}</strong>
+          <strong>{{ displayUserName(adminUser) }}</strong>
           <span>{{ userTypeLabel(adminUser.user_type) }}</span>
         </div>
         <button
@@ -60,7 +60,9 @@
             <el-input v-model="adminSearch" class="search-input" placeholder="搜索当前列表" :prefix-icon="Search" clearable />
             <el-button :icon="Refresh" :loading="isLoading" @click="handleReload">刷新</el-button>
             <el-button v-if="adminSection === 'users'" type="primary" :icon="Plus" @click="showUserDialog = true">新增用户</el-button>
+            <el-button v-if="adminSection === 'hanzi'" :icon="MagicStick" @click="showGenerateHanziDialog = true">按年级批量补充</el-button>
             <el-button v-if="adminSection === 'hanzi'" type="primary" :icon="Plus" @click="showHanziDialog = true">新增汉字</el-button>
+            <el-button v-if="adminSection === 'poems'" type="primary" :icon="Plus" @click="showPoemDialog = true">新增古诗</el-button>
             <el-button v-if="adminSection === 'tasks'" type="primary" :icon="Plus" @click="showTaskDialog = true">发布任务</el-button>
           </div>
         </header>
@@ -81,19 +83,37 @@
 
         <template v-else>
           <el-table v-if="adminSection === 'users'" :data="filteredUsers" :empty-text="emptyText" class="data-table">
-            <el-table-column prop="id" label="ID" width="150" />
-            <el-table-column prop="nickname" label="昵称" />
+            <el-table-column label="ID" width="180">
+              <template #default="{ row }">
+                <div class="user-id-cell">
+                  <el-tooltip :content="row.id" placement="top">
+                    <span class="user-id-text">{{ abbreviateId(row.id) }}</span>
+                  </el-tooltip>
+                  <el-button text :icon="CopyDocument" aria-label="复制完整用户 ID" @click="copyUserId(row.id)" />
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="昵称">
+              <template #default="{ row }">{{ displayUserName(row) }}</template>
+            </el-table-column>
             <el-table-column prop="phone" label="手机号" />
             <el-table-column prop="user_type" label="角色">
               <template #default="{ row }">{{ userTypeLabel(row.user_type) }}</template>
             </el-table-column>
-            <el-table-column prop="status" label="状态" width="110">
+            <el-table-column label="账号状态" width="190">
               <template #default="{ row }">
-                <el-switch
-                  :model-value="row.status === USER_STATUS_ENABLED"
-                  :loading="pendingUserIds.has(row.id)"
-                  @change="handleToggleUserStatus(row.id)"
-                />
+                <el-tooltip content="启用：允许登录和使用；停用：禁止登录和使用" placement="top">
+                  <div class="user-status-control">
+                    <el-switch
+                      :model-value="row.status === USER_STATUS_ENABLED"
+                      :loading="pendingUserIds.has(row.id)"
+                      @change="handleToggleUserStatus(row.id)"
+                    />
+                    <span :class="row.status === USER_STATUS_ENABLED ? 'status-enabled' : 'status-disabled'">
+                      {{ row.status === USER_STATUS_ENABLED ? '已启用（允许登录）' : '已停用（禁止登录）' }}
+                    </span>
+                  </div>
+                </el-tooltip>
               </template>
             </el-table-column>
           </el-table>
@@ -173,14 +193,55 @@
     <el-dialog v-model="showHanziDialog" title="新增汉字" width="420px" destroy-on-close>
       <el-form label-width="76px">
         <el-form-item label="汉字" required><el-input v-model="newHanzi.character_text" maxlength="1" /></el-form-item>
-        <el-form-item label="拼音"><el-input v-model="newHanzi.pinyin" /></el-form-item>
-        <el-form-item label="部首"><el-input v-model="newHanzi.radical" /></el-form-item>
-        <el-form-item label="笔画" required><el-input-number v-model="newHanzi.stroke_count" :min="MIN_STROKE_COUNT" /></el-form-item>
-        <el-form-item label="年级"><el-input v-model="newHanzi.grade_level" /></el-form-item>
+        <el-form-item label="年级" required>
+          <el-select v-model="newHanzi.grade_level" placeholder="请选择适用年级">
+            <el-option v-for="grade in GRADE_OPTIONS" :key="grade" :label="grade" :value="grade" />
+          </el-select>
+        </el-form-item>
+        <el-alert title="拼音、部首、笔画等信息将由后台字库自动补全。" type="info" show-icon :closable="false" />
       </el-form>
       <template #footer>
         <el-button @click="showHanziDialog = false">取消</el-button>
         <el-button type="primary" :loading="formSubmitting === 'hanzi'" @click="handleCreateHanzi">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showGenerateHanziDialog" title="按年级批量补充汉字" width="440px" destroy-on-close>
+      <el-form label-width="88px">
+        <el-form-item label="年级" required>
+          <el-select v-model="hanziGeneration.grade_level" placeholder="请选择年级">
+            <el-option v-for="grade in GRADE_OPTIONS" :key="grade" :label="grade" :value="grade" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="补充数量" required>
+          <el-input-number v-model="hanziGeneration.count" :min="MIN_GENERATION_COUNT" :max="MAX_GENERATION_COUNT" />
+        </el-form-item>
+        <el-alert title="系统会从该年级字库中随机选取尚未导入的汉字，已有汉字不会重复创建。" type="info" show-icon :closable="false" />
+      </el-form>
+      <template #footer>
+        <el-button @click="showGenerateHanziDialog = false">取消</el-button>
+        <el-button type="primary" :loading="formSubmitting === 'hanzi-generation'" @click="handleGenerateHanzi">开始补充</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showPoemDialog" title="新增古诗" width="600px" destroy-on-close>
+      <el-form label-width="76px">
+        <el-form-item label="诗名" required><el-input v-model="newPoem.title" /></el-form-item>
+        <el-form-item label="作者" required><el-input v-model="newPoem.author" /></el-form-item>
+        <el-form-item label="朝代" required><el-input v-model="newPoem.dynasty" /></el-form-item>
+        <el-form-item label="年级" required>
+          <el-select v-model="newPoem.grade_level" placeholder="请选择适用年级">
+            <el-option v-for="grade in GRADE_OPTIONS" :key="grade" :label="grade" :value="grade" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="正文" required><el-input v-model="newPoem.content" type="textarea" :rows="4" /></el-form-item>
+        <el-form-item label="注释"><el-input v-model="newPoem.annotation" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="译文"><el-input v-model="newPoem.translation" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="教材版本"><el-input v-model="newPoem.textbook_version" placeholder="如：人教版" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showPoemDialog = false">取消</el-button>
+        <el-button type="primary" :loading="formSubmitting === 'poem'" @click="handleCreatePoem">保存</el-button>
       </template>
     </el-dialog>
 
@@ -242,15 +303,33 @@
  * 组件只负责收集管理员输入并展示服务端状态，任何业务数据的读取和修改均通过
  * platform 提供的异步 API 操作完成，不保存演示账号、验证码或本地业务兜底数据。
  */
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Collection, Delete, Grid, Lock, Memo, Notebook, Plus, Refresh, Search, User } from '@element-plus/icons-vue';
+import { Collection, CopyDocument, Delete, Grid, Lock, MagicStick, Memo, Notebook, Plus, Refresh, Search, User } from '@element-plus/icons-vue';
 
 /** 后端用户启用状态，用于把数据库枚举转换为开关值。 */
 const USER_STATUS_ENABLED = 'enabled';
 
-/** 汉字最少一笔，是表单输入的技术约束而非业务演示数据。 */
-const MIN_STROKE_COUNT = 1;
+/** 持久化的管理端会话键，带版本后缀便于未来升级结构。 */
+const ADMIN_SESSION_STORAGE_KEY = 'hanzi-admin-session-v1';
+
+/** 当前会话数据版本，防止旧结构在页面升级后被误恢复。 */
+const ADMIN_SESSION_VERSION = 1;
+
+/** 可访问管理端的角色白名单。 */
+const ADMIN_ROLE_VALUES = ['admin', 'teacher'];
+
+/** 小学年级选项，统一单字、批量补充和古诗表单的数据格式。 */
+const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级'];
+
+/** 单次批量补充的最小数量。 */
+const MIN_GENERATION_COUNT = 1;
+
+/** 单次批量补充上限，避免误操作产生过大请求。 */
+const MAX_GENERATION_COUNT = 100;
+
+/** 批量补充表单默认数量，用语义常量避免页面散落魔法值。 */
+const DEFAULT_GENERATION_COUNT = 10;
 
 /** 可创建的用户角色，值与后端 UserAccount 枚举约定一致。 */
 const USER_ROLE_OPTIONS = [
@@ -291,10 +370,13 @@ const props = defineProps({
 
 const {
   createHanzi,
+  createPoem,
   createUser,
+  generateHanzi,
   hanziDb,
   isLoading,
   loadError,
+  initialLoadCompleted,
   login,
   poemsDb,
   publishTask,
@@ -328,6 +410,8 @@ const adminSection = ref('users');
 const adminSearch = ref('');
 const showUserDialog = ref(false);
 const showHanziDialog = ref(false);
+const showGenerateHanziDialog = ref(false);
+const showPoemDialog = ref(false);
 const showTaskDialog = ref(false);
 const formSubmitting = ref('');
 const selectedTaskItemIds = ref([]);
@@ -337,6 +421,8 @@ const pendingTaskIds = ref(new Set());
 const pendingRecordIds = ref(new Set());
 const newUser = reactive(createEmptyUser());
 const newHanzi = reactive(createEmptyHanzi());
+const hanziGeneration = reactive(createEmptyHanziGeneration());
+const newPoem = reactive(createEmptyPoem());
 const newTask = reactive(createEmptyTask());
 
 const adminSectionTitle = computed(() => adminMenu.find((item) => item.value === adminSection.value)?.label || '后台管理');
@@ -346,6 +432,18 @@ const filteredPoems = computed(() => filterRows(poemsDb.value, ['id', 'title', '
 const filteredTasks = computed(() => filterRows(tasks.value, ['id', 'task_name', 'target_id', 'status']));
 const filteredRecords = computed(() => filterRows(records.value, ['id', 'user_name', 'item_name', 'task_name', 'score_level']));
 const emptyText = computed(() => adminSearch.value.trim() ? '没有匹配当前搜索条件的数据' : '数据库暂无数据');
+
+/**
+ * 首次后端数据加载完成后才恢复会话，并与服务端用户列表核对权限和状态。
+ *
+ * 这个校验保证刷新或热更新不会无故返回登录页，同时已停用或已删除账号
+ * 也不会仅凭浏览器缓存继续进入管理端。
+ */
+watch(initialLoadCompleted, (completed) => {
+  if (completed && !adminUser.value) {
+    restoreAdminSession();
+  }
+}, { immediate: true });
 
 /**
  * 使用管理员输入的账号密码请求后台鉴权。
@@ -365,19 +463,21 @@ async function loginAdmin() {
   loginLoading.value = true;
   try {
     const authenticatedUser = await login({ username, password });
-    if (!authenticatedUser || !['admin', 'teacher'].includes(authenticatedUser.user_type)) {
+    if (!authenticatedUser || !ADMIN_ROLE_VALUES.includes(authenticatedUser.user_type)) {
       throw new Error('当前账号没有管理端访问权限');
     }
     if (authenticatedUser.status !== USER_STATUS_ENABLED) {
       throw new Error('当前账号已被停用');
     }
     adminUser.value = authenticatedUser;
+    persistAdminSession(authenticatedUser);
     adminPassword.value = '';
     if (loadError.value) {
       await reload();
     }
   } catch (error) {
     adminUser.value = null;
+    clearPersistedAdminSession();
     loginError.value = errorMessage(error, '登录失败，请稍后重试');
   } finally {
     loginLoading.value = false;
@@ -387,12 +487,13 @@ async function loginAdmin() {
 /**
  * 退出当前管理端会话。
  *
- * @returns {void} 清除内存中的登录用户和密码输入，不写入浏览器持久化存储。
+ * @returns {void} 清除内存中的登录用户、密码输入和浏览器持久化会话。
  */
 function logoutAdmin() {
   adminUser.value = null;
   adminPassword.value = '';
   loginError.value = '';
+  clearPersistedAdminSession();
 }
 
 /**
@@ -403,6 +504,7 @@ function logoutAdmin() {
 async function handleReload() {
   try {
     await reload();
+    reconcileAdminSession();
     ElMessage.success('后台数据已刷新');
   } catch (error) {
     ElMessage.error(errorMessage(error, '刷新后台数据失败'));
@@ -439,8 +541,8 @@ async function handleCreateUser() {
  * @returns {Promise<void>} 后台保存完成或错误消息展示后解析。
  */
 async function handleCreateHanzi() {
-  if (!newHanzi.character_text.trim()) {
-    ElMessage.warning('请输入要新增的汉字');
+  if (!newHanzi.character_text.trim() || !newHanzi.grade_level) {
+    ElMessage.warning('请输入汉字并选择年级');
     return;
   }
 
@@ -452,6 +554,62 @@ async function handleCreateHanzi() {
     ElMessage.success('汉字已保存到数据库');
   } catch (error) {
     ElMessage.error(errorMessage(error, '新增汉字失败'));
+  } finally {
+    formSubmitting.value = '';
+  }
+}
+
+/**
+ * 请求后端按年级随机补充汉字库。
+ *
+ * @returns {Promise<void>} 补充完成或错误消息展示后解析。
+ */
+async function handleGenerateHanzi() {
+  if (!hanziGeneration.grade_level || hanziGeneration.count < MIN_GENERATION_COUNT) {
+    ElMessage.warning('请选择年级并输入有效的补充数量');
+    return;
+  }
+
+  formSubmitting.value = 'hanzi-generation';
+  try {
+    const generated = await generateHanzi({
+      grade_level: hanziGeneration.grade_level,
+      count: hanziGeneration.count,
+    });
+    Object.assign(hanziGeneration, createEmptyHanziGeneration());
+    showGenerateHanziDialog.value = false;
+    ElMessage.success(generated.length ? `已新增 ${generated.length} 个汉字` : '该年级字库已全部导入，无需重复补充');
+  } catch (error) {
+    ElMessage.error(errorMessage(error, '批量补充汉字失败'));
+  } finally {
+    formSubmitting.value = '';
+  }
+}
+
+/**
+ * 新增古诗并在成功后重置表单。
+ *
+ * @returns {Promise<void>} 后端保存完成或错误消息展示后解析。
+ */
+async function handleCreatePoem() {
+  const requiredFieldMissing = !newPoem.title.trim()
+    || !newPoem.author.trim()
+    || !newPoem.dynasty.trim()
+    || !newPoem.grade_level
+    || !newPoem.content.trim();
+  if (requiredFieldMissing) {
+    ElMessage.warning('请完整填写诗名、作者、朝代、年级和正文');
+    return;
+  }
+
+  formSubmitting.value = 'poem';
+  try {
+    await createPoem(normalizeTextFields(newPoem));
+    Object.assign(newPoem, createEmptyPoem());
+    showPoemDialog.value = false;
+    ElMessage.success('古诗已保存到数据库');
+  } catch (error) {
+    ElMessage.error(errorMessage(error, '新增古诗失败'));
   } finally {
     formSubmitting.value = '';
   }
@@ -507,6 +665,7 @@ async function handlePublishTask() {
  */
 async function handleToggleUserStatus(userId) {
   await runRowOperation(pendingUserIds.value, userId, () => toggleUserStatus(userId), '修改用户状态失败');
+  reconcileAdminSession();
 }
 
 /**
@@ -565,6 +724,150 @@ async function runRowOperation(pendingIds, entityId, operation, fallbackMessage)
 }
 
 /**
+ * 保存最小化管理端会话。
+ *
+ * 仅保存恢复界面所需的非敏感用户字段，不保存密码、微信 openid 或任何凭据。
+ *
+ * @param {object} user 服务端鉴权成功后的管理用户。
+ * @returns {void} 存储成功后返回；浏览器禁用存储时静默降级为当前页会话。
+ */
+function persistAdminSession(user) {
+  const session = {
+    version: ADMIN_SESSION_VERSION,
+    user: {
+      id: user.id,
+      nickname: user.nickname || '',
+      user_type: user.user_type,
+      status: user.status,
+    },
+  };
+  try {
+    window.localStorage.setItem(ADMIN_SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch (error) {
+    // Safari 无痕模式或禁用站点存储时，当前页内的内存会话仍可正常使用。
+  }
+}
+
+/**
+ * 从浏览器读取会话，并使用后端最新用户数据恢复管理身份。
+ *
+ * @returns {void} 会话结构、角色、启用状态任一无效时清理缓存并保持未登录。
+ */
+function restoreAdminSession() {
+  let parsedSession;
+  try {
+    const serializedSession = window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
+    parsedSession = serializedSession ? JSON.parse(serializedSession) : null;
+  } catch (error) {
+    clearPersistedAdminSession();
+    return;
+  }
+
+  if (!isValidPersistedSession(parsedSession)) {
+    clearPersistedAdminSession();
+    return;
+  }
+
+  const serverUser = users.value.find((user) => user.id === parsedSession.user.id);
+  if (!serverUser || serverUser.status !== USER_STATUS_ENABLED || !ADMIN_ROLE_VALUES.includes(serverUser.user_type)) {
+    clearPersistedAdminSession();
+    return;
+  }
+  adminUser.value = serverUser;
+  persistAdminSession(serverUser);
+}
+
+/**
+ * 校验持久化会话的版本和必要字段。
+ *
+ * @param {unknown} session 从 localStorage 解析的未知数据。
+ * @returns {boolean} 结构完整、版本匹配且字段类型正确时返回 true。
+ */
+function isValidPersistedSession(session) {
+  return Boolean(
+    session
+    && typeof session === 'object'
+    && session.version === ADMIN_SESSION_VERSION
+    && session.user
+    && typeof session.user === 'object'
+    && typeof session.user.id === 'string'
+    && session.user.id
+    && typeof session.user.user_type === 'string'
+    && typeof session.user.status === 'string',
+  );
+}
+
+/**
+ * 使当前会话与服务端用户列表保持一致。
+ *
+ * @returns {void} 账号仍有权限时更新展示信息；已删除、已停用或角色改变时退出。
+ */
+function reconcileAdminSession() {
+  if (!adminUser.value) {
+    return;
+  }
+  const serverUser = users.value.find((user) => user.id === adminUser.value.id);
+  if (!serverUser || serverUser.status !== USER_STATUS_ENABLED || !ADMIN_ROLE_VALUES.includes(serverUser.user_type)) {
+    logoutAdmin();
+    ElMessage.warning('当前账号已停用、删除或失去管理权限，请重新登录');
+    return;
+  }
+  adminUser.value = serverUser;
+  persistAdminSession(serverUser);
+}
+
+/**
+ * 清理浏览器中的管理端会话。
+ *
+ * @returns {void} 键不存在或存储不可用时也不抛出异常。
+ */
+function clearPersistedAdminSession() {
+  try {
+    window.localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+  } catch (error) {
+    // 存储不可用时无其他持久化状态需要清理。
+  }
+}
+
+/**
+ * 生成用户友好的昵称，兼容微信资料的常见字段命名。
+ *
+ * @param {object} user 用户记录。
+ * @returns {string} 优先使用真实昵称，缺失时返回明确的微信用户占位文本。
+ */
+function displayUserName(user) {
+  const nicknameCandidates = [user.nickname, user.wx_nickname, user.wechat_nickname, user.nickName];
+  const nickname = nicknameCandidates.find((candidate) => typeof candidate === 'string' && candidate.trim());
+  return nickname ? nickname.trim() : '微信用户';
+}
+
+/**
+ * 将较长用户 ID 缩略为可扫读格式。
+ *
+ * @param {unknown} userId 后端用户唯一标识。
+ * @returns {string} 短 ID 原样返回，长 ID 保留首尾并在中间显示省略号。
+ */
+function abbreviateId(userId) {
+  const normalizedId = String(userId || '');
+  return normalizedId.length > 18 ? `${normalizedId.slice(0, 8)}…${normalizedId.slice(-6)}` : normalizedId;
+}
+
+/**
+ * 复制完整用户 ID，便于在缩略显示时仍可排查精确账号。
+ *
+ * @param {unknown} userId 待复制的用户唯一标识。
+ * @returns {Promise<void>} 复制完成或错误消息展示后解析。
+ */
+async function copyUserId(userId) {
+  try {
+    await navigator.clipboard.writeText(String(userId || ''));
+    ElMessage.success('完整用户 ID 已复制');
+  } catch (error) {
+    ElMessage.error('复制失败，请点击 ID 提示后手动复制');
+  }
+}
+
+/**
  * 根据管理端搜索框过滤表格。
  *
  * @param {Array<object>} rows 表格原始行。
@@ -604,7 +907,34 @@ function createEmptyUser() {
  * @returns {object} 汉字文本字段为空、笔画数使用输入组件下限的初始状态。
  */
 function createEmptyHanzi() {
-  return { character_text: '', pinyin: '', radical: '', stroke_count: MIN_STROKE_COUNT, grade_level: '' };
+  return { character_text: '', grade_level: '' };
+}
+
+/**
+ * 创建空的汉字批量补充表单。
+ *
+ * @returns {{grade_level: string, count: number}} 年级待选且使用安全默认数量的表单。
+ */
+function createEmptyHanziGeneration() {
+  return { grade_level: '', count: DEFAULT_GENERATION_COUNT };
+}
+
+/**
+ * 创建空古诗表单。
+ *
+ * @returns {object} 与后端古诗实体创建接口对应的空字段集合。
+ */
+function createEmptyPoem() {
+  return {
+    title: '',
+    author: '',
+    dynasty: '',
+    content: '',
+    annotation: '',
+    translation: '',
+    grade_level: '',
+    textbook_version: '',
+  };
 }
 
 /**
